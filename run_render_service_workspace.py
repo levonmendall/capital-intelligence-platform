@@ -253,6 +253,16 @@ def main() -> int:
     )
 
     install_capability_scoped_release_diagnostic(memory_safe)
+
+    # Keep only API and Streamlit live while the release prequalification + exact-release
+    # diagnostic thread is active. The supervisor already owns this barrier; reconnecting
+    # it here prevents background heavy workers from contributing service RSS during the
+    # governed production-context handoff without changing any resource or investment gate.
+    from operations.release_diagnostic_deferred_worker_gate import (
+        install as install_release_diagnostic_deferred_worker_gate,
+    )
+
+    install_release_diagnostic_deferred_worker_gate(memory_safe)
     return run_service()
 
 
