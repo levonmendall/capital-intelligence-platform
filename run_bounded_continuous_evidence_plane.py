@@ -38,6 +38,7 @@ _SPEC = WorkerSpec(
 )
 _DAG_WORKERS_ENV = "CAPITAL_INTELLIGENCE_CERTIFICATION_DAG_WORKERS"
 _FAILURE_EVENT = "continuous_evidence_plane_failure_context"
+_STAGE_WRAPPER_INTERNAL_ERROR_RETURN_CODE = 2
 
 
 def _lane_wait_seconds(values: Mapping[str, str]) -> float:
@@ -65,6 +66,70 @@ def _bounded_evidence_values(values: Mapping[str, str]) -> dict[str, str]:
     if str(resolved.get("RENDER") or "").strip().lower() == "true":
         resolved[_DAG_WORKERS_ENV] = "1"
     return resolved
+
+
+def _durably_completed_pipeline_exit(values: Mapping[str, str], return_code: int) -> bool:
+    """Accept only the coordinator's generic late error after exact durable completion."""
+
+    if return_code != _STAGE_WRAPPER_INTERNAL_ERROR_RETURN_CODE:
+        return False
+    try:
+        from operations.stage_isolated_evidence_pipeline import (
+            _STAGES,
+            load_stage_isolated_evidence_state,
+        )
+
+        state = load_stage_isolated_evidence_state(values)
+    except (OSError, TypeError, ValueError, RuntimeError):
+        return False
+    if state is None:
+        return False
+    expected_release = (
+        values.get("CAPITAL_INTELLIGENCE_RELEASE")
+        or values.get("RENDER_GIT_COMMIT")
+        or values.get("GITHUB_SHA")
+        or ""
+    ).strip()
+    return bool(
+        state.state == "completed"
+        and state.completed_stages == _STAGES
+        and state.generation_id
+        and (not expected_release or state.release == expected_release)
+    )
+
+
+def _emit_pipeline_exit_reconciled(values: Mapping[str, str]) -> None:
+    """Publish advisory reconciliation telemetry without creating a new failure path."""
+
+    try:
+        from operations.stage_isolated_evidence_pipeline import (
+            load_stage_isolated_evidence_state,
+        )
+
+        state = load_stage_isolated_evidence_state(values)
+        print(
+            json.dumps(
+                {
+                    "event": "stage_isolated_evidence_pipeline_exit_reconciled",
+                    "pipeline_id": None if state is None else state.pipeline_id,
+                    "generation_id": None if state is None else state.generation_id,
+                    "child_return_code": _STAGE_WRAPPER_INTERNAL_ERROR_RETURN_CODE,
+                    "durable_pipeline_completion": True,
+                    "reconciliation_authority": "exact_pipeline_journal",
+                    "decision_authority": False,
+                    "candidate_authority": False,
+                    "sizing_authority": False,
+                    "construction_authority": False,
+                    "execution_authority": False,
+                    "paper_only": True,
+                    "real_money_authorized": False,
+                },
+                sort_keys=True,
+            ),
+            flush=True,
+        )
+    except Exception:
+        pass
 
 
 def _memory_failure_context(values: Mapping[str, str]) -> None:
@@ -244,6 +309,9 @@ def run_continuous_once(values: Mapping[str, str] | None = None) -> int:
         values=resolved,
         lane_wait_seconds=_lane_wait_seconds(resolved),
     )
+    if _durably_completed_pipeline_exit(resolved, return_code):
+        _emit_pipeline_exit_reconciled(resolved)
+        return 0
     if return_code == 125:
         _memory_failure_context(resolved)
     return return_code
