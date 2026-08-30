@@ -39,6 +39,7 @@ def _global_snapshot(as_of: datetime):
         evidence_as_of=as_of,
         held_symbols=(),
         tracked_symbols=(),
+        result=SimpleNamespace(lanes=()),
     )
 
 

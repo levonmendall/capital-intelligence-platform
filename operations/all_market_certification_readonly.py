@@ -35,7 +35,12 @@ from operations.certification_state_machine import CertificationState
 
 def _digest(payload: Mapping[str, object]) -> str:
     return hashlib.sha256(
-        json.dumps(dict(payload), sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
+        json.dumps(
+            dict(payload),
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
     ).hexdigest()
 
 
@@ -62,8 +67,31 @@ def _data_root(values: Mapping[str, str]) -> Path:
     return Path(raw).expanduser()
 
 
+def _v2_root(values: Mapping[str, str]) -> Path:
+    return _data_root(values) / "all-market-certification-v2"
+
+
+def _v2_latest_ledger_path(values: Mapping[str, str]) -> Path:
+    return (
+        _v2_root(values)
+        / "ledger"
+        / _safe(_release(values))
+        / "latest-input.json"
+    )
+
+
+def _v2_ledger_present(values: Mapping[str, str]) -> bool:
+    try:
+        return _v2_latest_ledger_path(values).exists()
+    except CertificationRuntimeStateError:
+        return False
+
+
 def _legacy_root(values: Mapping[str, str]) -> Path:
-    return Path(values.get("CAPITAL_INTELLIGENCE_DATA_DIR") or "database").expanduser() / "all-market-certification"
+    return (
+        Path(values.get("CAPITAL_INTELLIGENCE_DATA_DIR") or "database").expanduser()
+        / "all-market-certification"
+    )
 
 
 def _load_mapping(path: Path) -> Mapping[str, object] | None:
@@ -85,6 +113,24 @@ def _integrity_mapping(path: Path) -> Mapping[str, object] | None:
     return body
 
 
+def _aware_iso(value: object) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        return None
+    return parsed.astimezone(timezone.utc)
+
+
+def _nonnegative_int(value: object) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return None
+    return value
+
+
 def resolve_latest_certification_readonly(
     *, values: Mapping[str, str]
 ) -> CertificationRuntimeBinding:
@@ -93,13 +139,7 @@ def resolve_latest_certification_readonly(
     release = _release(values)
     if release == "unknown":
         raise CertificationRuntimeStateError("certification release is unavailable")
-    latest = _integrity_mapping(
-        _data_root(values)
-        / "all-market-certification-v2"
-        / "ledger"
-        / _safe(release)
-        / "latest-input.json"
-    )
+    latest = _integrity_mapping(_v2_latest_ledger_path(values))
     if latest is None:
         raise CertificationRuntimeStateError("certification input ledger is unavailable")
     if str(latest.get("release") or "") != release:
@@ -113,7 +153,9 @@ def resolve_latest_certification_readonly(
         raise CertificationRuntimeStateError("certification input cutoff is invalid") from error
     if cutoff.tzinfo is None or cutoff.utcoffset() is None:
         raise CertificationRuntimeStateError("certification input cutoff is not timezone-aware")
-    return resolve_certification_for_cutoff(cutoff.astimezone(timezone.utc), values=values)
+    return resolve_certification_for_cutoff(
+        cutoff.astimezone(timezone.utc), values=values
+    )
 
 
 def _readonly_v2(values: Mapping[str, str]) -> dict[str, object]:
@@ -144,17 +186,30 @@ def _readonly_v2(values: Mapping[str, str]) -> dict[str, object]:
     try:
         binding = resolve_latest_certification_readonly(values=values)
     except CertificationRuntimeStateError as error:
-        return {**unavailable, "certification_v2_blocker": f"runtime_state_unavailable:{error}"}
+        return {
+            **unavailable,
+            "certification_v2_blocker": f"runtime_state_unavailable:{error}",
+        }
 
     input_integrity = _v2_input_integrity_valid(values, binding)
     state_integrity, terminal = _v2_state_integrity(values, binding)
     release_matches = binding.release == _release(values) and binding.release != "unknown"
     trustworthy = input_integrity and state_integrity and release_matches
-    evidence = trustworthy and _state_reached(binding.current_state, CertificationState.SNAPSHOT_FROZEN)
-    screening = trustworthy and _state_reached(binding.current_state, CertificationState.SCREENING_COMPLETE)
-    committee = trustworthy and _state_reached(binding.current_state, CertificationState.COMMITTEE_COMPLETE)
-    cio = trustworthy and _state_reached(binding.current_state, CertificationState.CIO_COMPLETE)
-    construction = trustworthy and _state_reached(binding.current_state, CertificationState.CONSTRUCTION_COMPLETE)
+    evidence = trustworthy and _state_reached(
+        binding.current_state, CertificationState.SNAPSHOT_FROZEN
+    )
+    screening = trustworthy and _state_reached(
+        binding.current_state, CertificationState.SCREENING_COMPLETE
+    )
+    committee = trustworthy and _state_reached(
+        binding.current_state, CertificationState.COMMITTEE_COMPLETE
+    )
+    cio = trustworthy and _state_reached(
+        binding.current_state, CertificationState.CIO_COMPLETE
+    )
+    construction = trustworthy and _state_reached(
+        binding.current_state, CertificationState.CONSTRUCTION_COMPLETE
+    )
     paper_implemented = trustworthy and terminal is CertificationState.PAPER_IMPLEMENTED
     no_action = trustworthy and terminal is CertificationState.NO_ACTION
     operational = trustworthy and binding.current_state is CertificationState.CERTIFIED
@@ -189,7 +244,178 @@ def _readonly_v2(values: Mapping[str, str]) -> dict[str, object]:
         "certification_v2_us_equity_discovery_snapshot_id": binding.us_equity_discovery_snapshot_id or None,
         "certification_v2_paper_evidence_snapshot_id": binding.paper_evidence_snapshot_id or None,
         "certification_v2_policy_compatibility_hash": binding.policy_compatibility_hash or None,
-        "certification_v2_blocker": None if operational else f"state:{binding.current_state.value}",
+        "certification_v2_blocker": (
+            None if operational else f"state:{binding.current_state.value}"
+        ),
+    }
+
+
+def _unavailable_v2_lane_audit() -> dict[str, object]:
+    return {
+        "all_market_runtime_certified": False,
+        "all_market_certification_integrity_valid": False,
+        "all_market_certification_release_matches": False,
+        "all_market_certification_id": None,
+        "all_market_certification_epoch": None,
+        "all_market_certification_aggregate_sha256": None,
+        "all_market_certification_discovery_manifest_fingerprint": None,
+        "all_market_comprehensive_discovery_complete": False,
+        "all_market_scheduled_market_coverage_complete": False,
+        "all_market_terminal_screening_complete": False,
+        "all_market_certified_lanes": [],
+        "all_market_lane_certification_source": "certification_v2_input_summary",
+    }
+
+
+def _v2_lane_audit(
+    values: Mapping[str, str],
+    v2: Mapping[str, object],
+) -> dict[str, object]:
+    """Validate compact lane proof frozen into the immutable v2 input.
+
+    The freeze owner has the qualified global discovery result already resident while
+    creating the content-addressed input. It records only bounded counts and validity bits,
+    so this read-only telemetry path never reloads the large discovery graph.
+    """
+
+    unavailable = _unavailable_v2_lane_audit()
+    if not all(
+        (
+            v2.get("all_market_certification_v2_available") is True,
+            v2.get("all_market_certification_v2_input_integrity_valid") is True,
+            v2.get("all_market_certification_v2_state_integrity_valid") is True,
+            v2.get("all_market_certification_v2_release_matches") is True,
+            v2.get("all_market_evidence_certified") is True,
+            v2.get("all_market_screening_certified") is True,
+        )
+    ):
+        return unavailable
+
+    certification_id = str(v2.get("all_market_certification_v2_id") or "").strip()
+    release = _release(values)
+    if not certification_id or release == "unknown":
+        return unavailable
+    input_path = (
+        _v2_root(values)
+        / "inputs"
+        / _safe(release)
+        / f"{certification_id}.json"
+    )
+    input_payload = _load_mapping(input_path)
+    if input_payload is None:
+        return unavailable
+    record_id = str(input_payload.get("record_id") or "").strip()
+    input_body = {
+        str(key): value
+        for key, value in input_payload.items()
+        if key != "record_id"
+    }
+    if not (
+        record_id == certification_id
+        and _digest(input_body) == certification_id
+        and str(input_payload.get("schema_version") or "")
+        == "all-market-certification-input.v2"
+        and str(input_payload.get("release") or "") == release
+        and str(input_payload.get("global_discovery_snapshot_id") or "")
+        == str(v2.get("all_market_global_discovery_snapshot_id") or "")
+    ):
+        return unavailable
+
+    evidence_as_of = _aware_iso(input_payload.get("evidence_as_of"))
+    raw_scheduled = input_payload.get("scheduled_lanes")
+    raw_summary = input_payload.get("global_discovery_lane_summary")
+    if (
+        evidence_as_of is None
+        or not isinstance(raw_scheduled, list)
+        or not raw_scheduled
+        or not isinstance(raw_summary, list)
+        or not raw_summary
+    ):
+        return unavailable
+    scheduled_lanes = tuple(str(item).strip() for item in raw_scheduled)
+    if any(not item for item in scheduled_lanes) or len(set(scheduled_lanes)) != len(
+        scheduled_lanes
+    ):
+        return unavailable
+
+    lanes: list[dict[str, object]] = []
+    lane_names: list[str] = []
+    complete = True
+    for raw_lane in raw_summary:
+        if not isinstance(raw_lane, Mapping):
+            return unavailable
+        lane_name = str(raw_lane.get("asset_class") or "").strip()
+        catalog_count = _nonnegative_int(raw_lane.get("catalog_count"))
+        deep_analyzed_count = _nonnegative_int(raw_lane.get("deep_analyzed_count"))
+        selected_count = _nonnegative_int(raw_lane.get("selected_count"))
+        excluded_count = _nonnegative_int(raw_lane.get("excluded_count"))
+        terminal_count = _nonnegative_int(raw_lane.get("terminal_count"))
+        if (
+            not lane_name
+            or raw_lane.get("scheduled") is not True
+            or None
+            in {
+                catalog_count,
+                deep_analyzed_count,
+                selected_count,
+                excluded_count,
+                terminal_count,
+            }
+        ):
+            return unavailable
+        terminal_accounting_complete = bool(
+            raw_lane.get("terminal_accounting_complete") is True
+            and terminal_count == selected_count + excluded_count
+            and terminal_count == catalog_count
+        )
+        point_in_time_valid = raw_lane.get("point_in_time_valid") is True
+        freshness_valid = raw_lane.get("freshness_valid") is True
+        lane_names.append(lane_name)
+        complete = bool(
+            complete
+            and terminal_accounting_complete
+            and point_in_time_valid
+            and freshness_valid
+        )
+        lanes.append(
+            {
+                "asset_class": lane_name,
+                "scheduled": True,
+                "catalog_count": catalog_count,
+                "deep_analyzed_count": deep_analyzed_count,
+                "selected_count": selected_count,
+                "excluded_count": excluded_count,
+                "terminal_count": terminal_count,
+                "represented": catalog_count > 0,
+                "terminal_accounting_complete": terminal_accounting_complete,
+                "point_in_time_valid": point_in_time_valid,
+                "freshness_valid": freshness_valid,
+            }
+        )
+
+    if len(set(lane_names)) != len(lane_names) or set(lane_names) != set(scheduled_lanes):
+        return unavailable
+    represented = complete and all(item["represented"] is True for item in lanes)
+    terminal = complete and v2.get("all_market_screening_certified") is True
+    policy_material = input_payload.get("policy_material")
+    discovery_fingerprint = None
+    if isinstance(policy_material, Mapping):
+        discovery_fingerprint = str(
+            input_payload.get("global_discovery_snapshot_id") or ""
+        ) or None
+    return {
+        "all_market_runtime_certified": complete,
+        "all_market_certification_integrity_valid": complete,
+        "all_market_certification_release_matches": True,
+        "all_market_certification_id": certification_id,
+        "all_market_certification_epoch": evidence_as_of.isoformat(),
+        "all_market_certification_aggregate_sha256": None,
+        "all_market_certification_discovery_manifest_fingerprint": discovery_fingerprint,
+        "all_market_comprehensive_discovery_complete": complete,
+        "all_market_scheduled_market_coverage_complete": represented,
+        "all_market_terminal_screening_complete": terminal,
+        "all_market_certified_lanes": lanes,
+        "all_market_lane_certification_source": "certification_v2_input_summary",
     }
 
 
@@ -199,6 +425,7 @@ def _legacy_lane_audit(values: Mapping[str, str]) -> dict[str, object]:
         "all_market_scheduled_market_coverage_complete": False,
         "all_market_terminal_screening_complete": False,
         "all_market_certified_lanes": [],
+        "all_market_lane_certification_source": "legacy_compositional_certificate",
     }
     root = _legacy_root(values)
     latest = _load_mapping(root / "latest.json")
@@ -229,7 +456,11 @@ def _legacy_lane_audit(values: Mapping[str, str]) -> dict[str, object]:
         artifact = _load_mapping(certification_dir / "lanes" / lane / artifact_name)
         if artifact is None:
             return unavailable
-        body = {str(key): value for key, value in artifact.items() if key != "artifact_sha256"}
+        body = {
+            str(key): value
+            for key, value in artifact.items()
+            if key != "artifact_sha256"
+        }
         if str(artifact.get("artifact_sha256") or "") != _digest(body):
             return unavailable
         artifacts[lane] = artifact
@@ -238,12 +469,16 @@ def _legacy_lane_audit(values: Mapping[str, str]) -> dict[str, object]:
                 "asset_class": lane,
                 "scheduled": True,
                 "catalog_count": int(artifact.get("catalog_count") or 0),
-                "deep_analyzed_count": int(artifact.get("deep_analyzed_count") or 0),
+                "deep_analyzed_count": int(
+                    artifact.get("deep_analyzed_count") or 0
+                ),
                 "selected_count": int(artifact.get("selected_count") or 0),
                 "excluded_count": int(artifact.get("excluded_count") or 0),
                 "terminal_count": int(artifact.get("terminal_count") or 0),
                 "represented": int(artifact.get("catalog_count") or 0) > 0,
-                "terminal_accounting_complete": artifact.get("terminal_accounting_complete") is True,
+                "terminal_accounting_complete": (
+                    artifact.get("terminal_accounting_complete") is True
+                ),
                 "point_in_time_valid": artifact.get("point_in_time_valid") is True,
                 "freshness_valid": artifact.get("freshness_valid") is True,
             }
@@ -253,22 +488,37 @@ def _legacy_lane_audit(values: Mapping[str, str]) -> dict[str, object]:
     except AllMarketLaneCertificationError:
         return unavailable
     complete = evaluated.get("all_market_runtime_certified") is True
-    represented = complete and bool(lanes) and all(item["represented"] is True for item in lanes)
-    terminal = complete and all(item["terminal_accounting_complete"] is True for item in lanes)
+    represented = complete and bool(lanes) and all(
+        item["represented"] is True for item in lanes
+    )
+    terminal = complete and all(
+        item["terminal_accounting_complete"] is True for item in lanes
+    )
     return {
         "all_market_comprehensive_discovery_complete": complete,
         "all_market_scheduled_market_coverage_complete": represented,
         "all_market_terminal_screening_complete": terminal,
         "all_market_certified_lanes": lanes,
+        "all_market_lane_certification_source": "legacy_compositional_certificate",
     }
 
 
-def public_all_market_certification_readonly(values: Mapping[str, str]) -> dict[str, object]:
-    """Return public audit with independent certification readable but never advanced."""
+def public_all_market_certification_readonly(
+    values: Mapping[str, str],
+) -> dict[str, object]:
+    """Return independent all-market proof without ever advancing certification.
+
+    Once a current-release v2 ledger exists it is authoritative. Missing or corrupt compact
+    proof fails closed instead of silently inheriting a stale legacy green result. Legacy
+    compositional artifacts remain a compatibility fallback only before v2 is established.
+    """
 
     base = public_all_market_certification(values)
     v2 = _readonly_v2(values)
-    lanes = _legacy_lane_audit(values)
+    if _v2_ledger_present(values):
+        lanes = _v2_lane_audit(values, v2)
+    else:
+        lanes = _legacy_lane_audit(values)
     return {**base, **v2, **lanes}
 
 
