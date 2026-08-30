@@ -107,13 +107,29 @@ def _base_universe_symbols() -> tuple[str, ...]:
 def _stage_reference(values: dict[str, str], state) -> dict[str, object]:
     from operations import component_qualified_evidence_maintenance as maintenance
 
-    # Preserve the existing release-independent reuse contract: if a still-fresh public
-    # component already established an evidence epoch, bind reference components to that
-    # epoch rather than silently moving downstream stages to a newer cutoff.
+    # A first attempt may still bind to an older compatible public component so fresh
+    # release-independent evidence is not needlessly reacquired. A superseded attempt is
+    # different: its archived failed journal is durable proof that the older epoch already
+    # failed. Never move the replacement epoch backward behind evidence persisted while
+    # that failed attempt was running, or point-in-time historical validation can fail in
+    # the same way forever. If archive inspection itself is unavailable, fail safe by
+    # preserving the replacement epoch rather than permitting a backdated retry.
     preparation_cutoff = maintenance._resumable_evidence_cutoff(
         values,
         requested=state.evidence_as_of,
     )
+    if preparation_cutoff < state.evidence_as_of:
+        attempts_dir = state.path.parent / "attempts"
+        try:
+            superseded_attempt = attempts_dir.is_dir() and any(
+                path.is_file() and path.suffix == ".json"
+                for path in attempts_dir.iterdir()
+            )
+        except OSError:
+            superseded_attempt = True
+        if superseded_attempt:
+            preparation_cutoff = state.evidence_as_of
+
     manifest, effective_cutoff = maintenance._bound_or_prepare_reference_manifest(
         values,
         preparation_cutoff=preparation_cutoff,
