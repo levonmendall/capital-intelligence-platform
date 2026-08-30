@@ -12,8 +12,9 @@ CIO decision, construction change, paper transaction, or live-money action.
 from __future__ import annotations
 
 import html
-from datetime import datetime, timezone
 from typing import Any, Callable, Mapping
+
+from ui_reporting_time import format_reporting_timestamp
 
 
 _ORIGINAL_ATTR = "_evidence_accumulation_original_command_center_html"
@@ -33,18 +34,7 @@ def _int(value: object, default: int = 0) -> int:
 
 
 def _when(value: object) -> str:
-    if value in (None, ""):
-        return "No snapshot timestamp"
-    text = str(value).strip()
-    if not text:
-        return "No snapshot timestamp"
-    try:
-        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
-    except ValueError:
-        return text
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone().strftime("%b %d, %-I:%M %p")
+    return format_reporting_timestamp(value, missing="No snapshot timestamp")
 
 
 def _evaluation_rows(summary: Mapping[str, Any] | None) -> tuple[Mapping[str, Any], ...]:
