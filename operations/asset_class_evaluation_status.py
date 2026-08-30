@@ -366,6 +366,12 @@ def _terminal_evaluation_attempt(
     raw_blocking = aggregate.get("blocking_reasons", ())
     if not isinstance(required, list) or not required:
         return None
+    normalized_required = tuple(str(item).strip().lower() for item in required)
+    exact_governed_scope = (
+        len(normalized_required) == len(_GOVERNED_ASSET_CLASSES)
+        and len(set(normalized_required)) == len(normalized_required)
+        and set(normalized_required) == set(_GOVERNED_ASSET_CLASSES)
+    )
     blocking_reasons = (
         tuple(str(item) for item in raw_blocking)
         if isinstance(raw_blocking, list)
@@ -373,8 +379,7 @@ def _terminal_evaluation_attempt(
     )
 
     rows: list[dict[str, object]] = []
-    for raw_lane in required:
-        lane = str(raw_lane).strip().lower()
+    for lane in normalized_required:
         if not lane:
             continue
         rows.append(
@@ -395,7 +400,7 @@ def _terminal_evaluation_attempt(
         as_of=pointer_epoch,
         source=(
             "Current all-market certification"
-            if certified_flag and all_evaluated
+            if certified_flag and exact_governed_scope and all_evaluated
             else "Current all-market evaluation"
         ),
     )
