@@ -409,7 +409,7 @@ def _v2_lane_audit(
         "all_market_certification_release_matches": True,
         "all_market_certification_id": certification_id,
         "all_market_certification_epoch": evidence_as_of.isoformat(),
-        "all_market_certification_aggregate_sha256": None,
+        "all_market_certification_aggregate_sha256": certification_id,
         "all_market_certification_discovery_manifest_fingerprint": discovery_fingerprint,
         "all_market_comprehensive_discovery_complete": complete,
         "all_market_scheduled_market_coverage_complete": represented,
