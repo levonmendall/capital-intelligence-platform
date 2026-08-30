@@ -1,6 +1,7 @@
 """Shared Streamlit presentation composition for local and Render entrypoints."""
 from __future__ import annotations
 
+import all_market_certification_ui
 import app_impl
 import decision_pulse_ui_refinement
 import educational_market_briefing_ui
@@ -60,10 +61,12 @@ def install_canonical_surface_composition(
 
     # Portfolio-only presentation is deliberately installed last so the complete
     # underlying surfaces stay available to code/tests while Render exposes only the
-    # canonical portfolio during the operating phase. The evidence refinement then
-    # changes only that command center's read-only asset-class presentation.
+    # canonical portfolio during the operating phase. Evidence accumulation replaces
+    # only the read-only asset-class presentation, then certification provenance wraps
+    # that final renderer so both surfaces share one exact-release envelope.
     portfolio_only_runtime.install(app_impl, secure_app)
     portfolio_evidence_accumulation_ui.install(portfolio_only_runtime)
+    all_market_certification_ui.install(portfolio_only_runtime)
 
 
 __all__ = ["install_canonical_surface_composition"]
