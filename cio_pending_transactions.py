@@ -28,6 +28,8 @@ _GOVERNED_NO_ACTION_STATUSES = frozenset(
     }
 )
 _COMPARATIVE_NO_ACTION_STATUSES = frozenset({"no_superior_opportunity"})
+_CURRENT_NO_ACTION_STATUS = "current"
+_NO_EXECUTABLE_CHANGE_TEXT = "No executable portfolio change is proposed."
 
 
 def _aware_timestamp(value: str, *, field_name: str) -> datetime:
@@ -165,11 +167,28 @@ def _governed_no_action_briefing(
     as_of = str(briefing.get("as_of", "")).strip()
     status = str(briefing.get("status", "")).strip().lower()
     portfolio_decision = str(briefing.get("portfolio_decision", "")).strip()
+    decision_identifier = str(briefing.get("decision_identifier", "")).strip()
+    candidate_identifier = str(briefing.get("candidate_identifier", "")).strip()
+    decision_count = briefing.get("cio_decision_count")
+    construction_status = briefing.get("construction_status")
+    current_non_transaction_decision = bool(
+        status == _CURRENT_NO_ACTION_STATUS
+        and decision_identifier
+        and candidate_identifier
+        and isinstance(decision_count, int)
+        and not isinstance(decision_count, bool)
+        and decision_count > 0
+        and construction_status in {None, ""}
+        and _NO_EXECUTABLE_CHANGE_TEXT in portfolio_decision
+    )
     return bool(
         identifier
         and as_of
         and portfolio_decision
-        and status in _GOVERNED_NO_ACTION_STATUSES
+        and (
+            status in _GOVERNED_NO_ACTION_STATUSES
+            or current_non_transaction_decision
+        )
     )
 
 
