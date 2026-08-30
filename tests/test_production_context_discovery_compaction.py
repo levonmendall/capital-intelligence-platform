@@ -2,13 +2,41 @@ from __future__ import annotations
 
 import gc
 import weakref
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
+import pytest
+
 from operations import production_context_discovery_compaction as subject
+from portfolio.constants import (
+    CANONICAL_CONSTRAINT_PROFILE,
+    CANONICAL_PORTFOLIO_CODE,
+    CANONICAL_PORTFOLIO_NAME,
+    INITIAL_PAPER_CAPITAL,
+)
+from portfolio.state import (
+    CanonicalPortfolioIntegrityError,
+    CanonicalPortfolioSnapshot,
+    SQLiteCanonicalPortfolioStore,
+)
 
 
 class _HeavyEvidence:
     pass
+
+
+def _portfolio_snapshot(identifier: str, as_of: datetime) -> CanonicalPortfolioSnapshot:
+    return CanonicalPortfolioSnapshot(
+        identifier=identifier,
+        portfolio_code=CANONICAL_PORTFOLIO_CODE,
+        display_name=CANONICAL_PORTFOLIO_NAME,
+        constraint_profile=CANONICAL_CONSTRAINT_PROFILE,
+        as_of=as_of,
+        starting_capital=INITIAL_PAPER_CAPITAL,
+        cash_amount=INITIAL_PAPER_CAPITAL,
+        positions=(),
+        source_identifiers=("test-source",),
+    )
 
 
 def test_equity_compaction_preserves_context_contract_without_selected_graph() -> None:
@@ -91,9 +119,100 @@ def test_comprehensive_compaction_preserves_terminal_accounting_without_lane_gra
     assert heavy_ref() is None
 
 
-def test_installer_changes_only_production_context_discovery_seams() -> None:
+def test_bounded_tentative_portfolio_avoids_eager_history_rehydration(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    store = SQLiteCanonicalPortfolioStore(tmp_path / "portfolio.sqlite3")
+    as_of = datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc)
+    expected = _portfolio_snapshot("portfolio:test:exact", as_of)
+    store.append(expected)
+
+    def forbidden_history(*_args, **_kwargs):
+        raise AssertionError("eager canonical history must not be materialized")
+
+    def forbidden_legacy_integrity():
+        raise AssertionError("fetchall integrity verification must not be used")
+
+    monkeypatch.setattr(store, "history", forbidden_history)
+    monkeypatch.setattr(store, "verify_integrity", forbidden_legacy_integrity)
+
+    observed, exact = subject._bounded_tentative_portfolio(
+        store=store,
+        decision_as_of=as_of.astimezone(timezone(timedelta(hours=-7))),
+        context_identifier="context:test",
+    )
+
+    assert exact is True
+    assert observed == expected
+
+
+def test_bounded_tentative_portfolio_preserves_latest_history_fallback(tmp_path) -> None:
+    store = SQLiteCanonicalPortfolioStore(tmp_path / "portfolio.sqlite3")
+    prior_as_of = datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc)
+    decision_as_of = prior_as_of + timedelta(minutes=5)
+    store.append(_portfolio_snapshot("portfolio:test:prior", prior_as_of))
+
+    observed, exact = subject._bounded_tentative_portfolio(
+        store=store,
+        decision_as_of=decision_as_of,
+        context_identifier="context:test",
+    )
+
+    assert exact is False
+    assert observed.as_of == decision_as_of
+    assert observed.identifier == "portfolio:compounding:decision:20260830T120500Z"
+    assert observed.cash_amount == INITIAL_PAPER_CAPITAL
+    assert observed.source_identifiers == ("test-source", "context:test")
+
+
+def test_bounded_tentative_portfolio_still_fails_closed_on_duplicate_exact_time(
+    tmp_path,
+) -> None:
+    store = SQLiteCanonicalPortfolioStore(tmp_path / "portfolio.sqlite3")
+    as_of = datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc)
+    store.append(_portfolio_snapshot("portfolio:test:first", as_of))
+    store.append(_portfolio_snapshot("portfolio:test:second", as_of))
+
+    with pytest.raises(
+        subject._governed.ProductionPaperEvidenceError,
+        match="multiple canonical portfolio snapshots exist at the decision timestamp",
+    ):
+        subject._bounded_tentative_portfolio(
+            store=store,
+            decision_as_of=as_of,
+            context_identifier="context:test",
+        )
+
+
+def test_streaming_integrity_verification_remains_fail_closed(tmp_path) -> None:
+    store = SQLiteCanonicalPortfolioStore(tmp_path / "portfolio.sqlite3")
+    first_as_of = datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc)
+    store.append(_portfolio_snapshot("portfolio:test:first", first_as_of))
+    store.append(
+        _portfolio_snapshot(
+            "portfolio:test:second",
+            first_as_of + timedelta(minutes=1),
+        )
+    )
+    with store._connect() as connection:
+        connection.execute("DROP TRIGGER canonical_portfolio_no_update")
+        connection.execute(
+            "UPDATE canonical_portfolio_events SET previous_hash = ? WHERE sequence = 2",
+            ("f" * 64,),
+        )
+
+    with pytest.raises(
+        CanonicalPortfolioIntegrityError,
+        match="previous-hash link is invalid",
+    ):
+        subject._verify_canonical_integrity_streaming(store)
+
+
+def test_installer_changes_only_production_context_bounded_handoff_seams() -> None:
     original_equity = subject._governed.discover_us_equities
     original_comprehensive = subject._governed._discover_comprehensive_scope
+    original_tentative = subject._governed._tentative_portfolio
     had_installed = hasattr(subject._governed, subject._INSTALLED_ATTR)
     prior_installed = getattr(subject._governed, subject._INSTALLED_ATTR, None)
     if had_installed:
@@ -107,6 +226,7 @@ def test_installer_changes_only_production_context_discovery_seams() -> None:
             subject._governed._discover_comprehensive_scope
             is subject._compact_discover_comprehensive_scope
         )
+        assert subject._governed._tentative_portfolio is subject._bounded_tentative_portfolio
         assert getattr(subject._governed, subject._INSTALLED_ATTR) is True
 
         subject.install()
@@ -115,9 +235,11 @@ def test_installer_changes_only_production_context_discovery_seams() -> None:
             subject._governed._discover_comprehensive_scope
             is subject._compact_discover_comprehensive_scope
         )
+        assert subject._governed._tentative_portfolio is subject._bounded_tentative_portfolio
     finally:
         subject._governed.discover_us_equities = original_equity
         subject._governed._discover_comprehensive_scope = original_comprehensive
+        subject._governed._tentative_portfolio = original_tentative
         if had_installed:
             setattr(subject._governed, subject._INSTALLED_ATTR, prior_installed)
         elif hasattr(subject._governed, subject._INSTALLED_ATTR):
