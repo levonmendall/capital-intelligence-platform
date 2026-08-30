@@ -33,6 +33,8 @@ _SERVER_REPLACEMENT_GRACE_ATTEMPTS = 45
 _MAX_ADOPTED_FAILURES = 4
 _FRESH_AFTER_ENV = "CIO_DIAGNOSTIC_FRESH_AFTER"
 _PREQUALIFICATION_FAILURE_STAGE = "evidence_prequalification_failed"
+_V2_LANE_CERTIFICATION_SOURCE = "certification_v2_input_summary"
+_LEGACY_LANE_CERTIFICATION_SOURCE = "legacy_compositional_certificate"
 
 
 def _parse_utc(value: object) -> datetime | None:
@@ -382,8 +384,19 @@ def _verify_end_to_end_all_market_evaluation(
     )
     failed: list[str] = []
 
-    # Preserve the existing compositional market-lane proof. Certification v2 adds the
-    # downstream deterministic lineage; it does not weaken the lane aggregate contract.
+    # Require a known lane-proof contract before deciding which immutable integrity
+    # evidence is authoritative. Certification-v2 binds the compact lane summary inside
+    # its content-addressed immutable input, while the legacy compositional certificate
+    # proves the same lane aggregate with its standalone aggregate SHA.
+    lane_certification_source = str(
+        payload.get("all_market_lane_certification_source") or ""
+    ).strip()
+    if lane_certification_source not in {
+        _V2_LANE_CERTIFICATION_SOURCE,
+        _LEGACY_LANE_CERTIFICATION_SOURCE,
+    }:
+        failed.append("all_market_lane_certification_source")
+
     for name in (
         "all_market_runtime_certified",
         "all_market_certification_integrity_valid",
@@ -395,11 +408,15 @@ def _verify_end_to_end_all_market_evaluation(
     for name in (
         "all_market_certification_id",
         "all_market_certification_epoch",
-        "all_market_certification_aggregate_sha256",
         "all_market_certification_discovery_manifest_fingerprint",
     ):
         if not str(payload.get(name) or "").strip():
             failed.append(name)
+    if (
+        lane_certification_source == _LEGACY_LANE_CERTIFICATION_SOURCE
+        and not str(payload.get("all_market_certification_aggregate_sha256") or "").strip()
+    ):
+        failed.append("all_market_certification_aggregate_sha256")
 
     # Certification v2 is the authoritative release/evidence/decision handoff. Require
     # every analytical stage through construction and every immutable component identity.
