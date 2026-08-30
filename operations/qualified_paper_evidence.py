@@ -12,13 +12,20 @@ that was absent from the signed source universe.
 from __future__ import annotations
 
 import os
+import re
 from collections.abc import Mapping as MappingABC
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Iterator, Mapping
 
 from operations.capability_operating_evidence import (
     CapabilityOperatingEvidenceError,
     load_capability_operating_evidence,
+)
+from operations.certification_input_manifest import freeze_certification_input
+from operations.certification_runtime_state import (
+    certification_runtime_enabled,
+    resolve_certification_for_cutoff,
 )
 from operations.continuous_evidence_plane import (
     ContinuousEvidencePlaneError,
@@ -70,6 +77,58 @@ def _capability_scoped_operation_enabled(values: Mapping[str, str]) -> bool:
     return _enabled(values.get("RENDER"))
 
 
+def _certification_cutoff_ledger_path(
+    cutoff: datetime,
+    values: Mapping[str, str],
+) -> Path:
+    """Return the immutable exact-cutoff ledger path used by certification v2."""
+
+    if cutoff.tzinfo is None or cutoff.utcoffset() is None:
+        raise ValueError("certification cutoff must be timezone-aware")
+    data_root = str(values.get("CAPITAL_INTELLIGENCE_DATA_DIR") or "").strip()
+    if not data_root:
+        raise RuntimeError(
+            "CAPITAL_INTELLIGENCE_DATA_DIR is required for certification input"
+        )
+    release = str(
+        values.get("CAPITAL_INTELLIGENCE_RELEASE")
+        or values.get("RENDER_GIT_COMMIT")
+        or values.get("GITHUB_SHA")
+        or "unknown"
+    ).strip()
+    safe_release = re.sub(r"[^A-Za-z0-9_.-]+", "-", release).strip("-.") or "unknown"
+    stamp = cutoff.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    return (
+        Path(data_root).expanduser()
+        / "all-market-certification-v2"
+        / "ledger"
+        / safe_release
+        / "by-cutoff"
+        / f"{stamp}.json"
+    )
+
+
+def _ensure_all_market_certification_input_for_cutoff(
+    cutoff: datetime,
+    values: Mapping[str, str],
+) -> None:
+    """Freeze the provider-free all-market input once for an authorized diagnostic cutoff.
+
+    Ordinary capability-scoped serving never enters this path because certification runtime
+    authority remains disabled there. If the immutable exact-cutoff ledger already exists,
+    resolve it instead of replaying the initial state transitions; corruption therefore
+    remains fail-closed and a later certification stage can never be rewound.
+    """
+
+    if not certification_runtime_enabled(values):
+        return
+    exact_ledger = _certification_cutoff_ledger_path(cutoff, values)
+    if exact_ledger.exists():
+        resolve_certification_for_cutoff(cutoff, values=values)
+        return
+    freeze_certification_input(cutoff=cutoff, values=values)
+
+
 def production_snapshot_probe_enabled(values=None) -> bool:
     resolved = os.environ if values is None else values
     production = (
@@ -101,6 +160,7 @@ def _qualified_snapshot_and_universe_for_cutoff(cutoff: datetime):
             raise RuntimeError(
                 f"capability operating evidence snapshot is not ready: {error}"
             ) from error
+        _ensure_all_market_certification_input_for_cutoff(cutoff, values)
         values[_SNAPSHOT_ENV] = operating.snapshot_id
         return operating.snapshot, operating.universe
 
