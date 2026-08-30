@@ -65,7 +65,7 @@ def test_exact_release_completed_worker_fails_closed_before_construction(
 
     with pytest.raises(
         RuntimeError,
-        match="current=cio_complete, required=construction_complete",
+        match="current=CIO_COMPLETE, required=construction_complete",
     ):
         guard.run_triggered(
             "manual-cio",
