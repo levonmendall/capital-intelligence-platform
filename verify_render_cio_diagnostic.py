@@ -387,11 +387,17 @@ def _verify_end_to_end_all_market_evaluation(
     # Require a known lane-proof contract before deciding which immutable integrity
     # evidence is authoritative. Certification-v2 binds the compact lane summary inside
     # its content-addressed immutable input, while the legacy compositional certificate
-    # proves the same lane aggregate with its standalone aggregate SHA.
+    # proves the same lane aggregate with its standalone aggregate SHA. Pre-source legacy
+    # payloads remain acceptable only when they actually carry that aggregate proof.
     lane_certification_source = str(
         payload.get("all_market_lane_certification_source") or ""
     ).strip()
-    if lane_certification_source not in {
+    legacy_aggregate_sha = str(
+        payload.get("all_market_certification_aggregate_sha256") or ""
+    ).strip()
+    if not lane_certification_source and legacy_aggregate_sha:
+        lane_certification_source = _LEGACY_LANE_CERTIFICATION_SOURCE
+    elif lane_certification_source not in {
         _V2_LANE_CERTIFICATION_SOURCE,
         _LEGACY_LANE_CERTIFICATION_SOURCE,
     }:
@@ -414,7 +420,7 @@ def _verify_end_to_end_all_market_evaluation(
             failed.append(name)
     if (
         lane_certification_source == _LEGACY_LANE_CERTIFICATION_SOURCE
-        and not str(payload.get("all_market_certification_aggregate_sha256") or "").strip()
+        and not legacy_aggregate_sha
     ):
         failed.append("all_market_certification_aggregate_sha256")
 
