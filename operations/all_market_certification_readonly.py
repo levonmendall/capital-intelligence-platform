@@ -31,10 +31,6 @@ from operations.certification_runtime_state import (
     resolve_certification_for_cutoff,
 )
 from operations.certification_state_machine import CertificationState
-from operations.qualified_comprehensive_discovery_snapshot import (
-    ComprehensiveDiscoverySnapshotError,
-    load_qualified_comprehensive_discovery_snapshot,
-)
 
 
 def _digest(payload: Mapping[str, object]) -> str:
@@ -84,6 +80,13 @@ def _v2_latest_ledger_path(values: Mapping[str, str]) -> Path:
     )
 
 
+def _v2_ledger_present(values: Mapping[str, str]) -> bool:
+    try:
+        return _v2_latest_ledger_path(values).exists()
+    except CertificationRuntimeStateError:
+        return False
+
+
 def _legacy_root(values: Mapping[str, str]) -> Path:
     return (
         Path(values.get("CAPITAL_INTELLIGENCE_DATA_DIR") or "database").expanduser()
@@ -120,6 +123,12 @@ def _aware_iso(value: object) -> datetime | None:
     if parsed.tzinfo is None or parsed.utcoffset() is None:
         return None
     return parsed.astimezone(timezone.utc)
+
+
+def _nonnegative_int(value: object) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return None
+    return value
 
 
 def resolve_latest_certification_readonly(
@@ -242,8 +251,6 @@ def _readonly_v2(values: Mapping[str, str]) -> dict[str, object]:
 
 
 def _unavailable_v2_lane_audit() -> dict[str, object]:
-    """Return a fail-closed projection for an authoritative but unproved v2 ledger."""
-
     return {
         "all_market_runtime_certified": False,
         "all_market_certification_integrity_valid": False,
@@ -256,7 +263,7 @@ def _unavailable_v2_lane_audit() -> dict[str, object]:
         "all_market_scheduled_market_coverage_complete": False,
         "all_market_terminal_screening_complete": False,
         "all_market_certified_lanes": [],
-        "all_market_lane_certification_source": "certification_v2_global_snapshot",
+        "all_market_lane_certification_source": "certification_v2_input_summary",
     }
 
 
@@ -264,12 +271,11 @@ def _v2_lane_audit(
     values: Mapping[str, str],
     v2: Mapping[str, object],
 ) -> dict[str, object]:
-    """Reconstruct lane proof from the immutable v2 global-discovery snapshot.
+    """Validate compact lane proof frozen into the immutable v2 input.
 
-    Certification v2 freezes the exact qualified global snapshot and the scheduled-lane
-    set into a content-addressed input record. Once screening reaches its durable v2 state,
-    those artifacts are sufficient to reproduce the legacy lane terminal-accounting checks
-    without requiring a second mutable ``all-market-certification/latest.json`` pointer.
+    The freeze owner has the qualified global discovery result already resident while
+    creating the content-addressed input. It records only bounded counts and validity bits,
+    so this read-only telemetry path never reloads the large discovery graph.
     """
 
     unavailable = _unavailable_v2_lane_audit()
@@ -317,7 +323,14 @@ def _v2_lane_audit(
 
     evidence_as_of = _aware_iso(input_payload.get("evidence_as_of"))
     raw_scheduled = input_payload.get("scheduled_lanes")
-    if evidence_as_of is None or not isinstance(raw_scheduled, list) or not raw_scheduled:
+    raw_summary = input_payload.get("global_discovery_lane_summary")
+    if (
+        evidence_as_of is None
+        or not isinstance(raw_scheduled, list)
+        or not raw_scheduled
+        or not isinstance(raw_summary, list)
+        or not raw_summary
+    ):
         return unavailable
     scheduled_lanes = tuple(str(item).strip() for item in raw_scheduled)
     if any(not item for item in scheduled_lanes) or len(set(scheduled_lanes)) != len(
@@ -325,64 +338,71 @@ def _v2_lane_audit(
     ):
         return unavailable
 
-    try:
-        snapshot = load_qualified_comprehensive_discovery_snapshot(
-            evidence_as_of=evidence_as_of,
-            values=values,
-        )
-    except (ComprehensiveDiscoverySnapshotError, OSError, TypeError, ValueError):
-        return unavailable
-    if snapshot.snapshot_id != str(
-        input_payload.get("global_discovery_snapshot_id") or ""
-    ):
-        return unavailable
-
-    scheduled_snapshot_lanes = tuple(
-        lane for lane in snapshot.result.lanes if bool(lane.scheduled)
-    )
-    snapshot_lane_names = tuple(lane.asset_class.value for lane in scheduled_snapshot_lanes)
-    if (
-        len(set(snapshot_lane_names)) != len(snapshot_lane_names)
-        or set(snapshot_lane_names) != set(scheduled_lanes)
-    ):
-        return unavailable
-
     lanes: list[dict[str, object]] = []
-    all_terminal = True
-    all_point_in_time = True
-    for lane in scheduled_snapshot_lanes:
-        selected_count = len(lane.selected)
-        excluded_count = len(lane.exclusions)
-        terminal_count = selected_count + excluded_count
-        catalog_count = int(lane.catalog_count)
-        point_in_time_valid = all(
-            item.features.observed_at.tzinfo is not None
-            and item.features.observed_at.utcoffset() is not None
-            and item.features.observed_at.astimezone(timezone.utc) <= evidence_as_of
-            for item in lane.selected
+    lane_names: list[str] = []
+    complete = True
+    for raw_lane in raw_summary:
+        if not isinstance(raw_lane, Mapping):
+            return unavailable
+        lane_name = str(raw_lane.get("asset_class") or "").strip()
+        catalog_count = _nonnegative_int(raw_lane.get("catalog_count"))
+        deep_analyzed_count = _nonnegative_int(raw_lane.get("deep_analyzed_count"))
+        selected_count = _nonnegative_int(raw_lane.get("selected_count"))
+        excluded_count = _nonnegative_int(raw_lane.get("excluded_count"))
+        terminal_count = _nonnegative_int(raw_lane.get("terminal_count"))
+        if (
+            not lane_name
+            or raw_lane.get("scheduled") is not True
+            or None
+            in {
+                catalog_count,
+                deep_analyzed_count,
+                selected_count,
+                excluded_count,
+                terminal_count,
+            }
+        ):
+            return unavailable
+        terminal_accounting_complete = bool(
+            raw_lane.get("terminal_accounting_complete") is True
+            and terminal_count == selected_count + excluded_count
+            and terminal_count == catalog_count
         )
-        terminal_accounting_complete = terminal_count == catalog_count
-        all_terminal = all_terminal and terminal_accounting_complete
-        all_point_in_time = all_point_in_time and point_in_time_valid
+        point_in_time_valid = raw_lane.get("point_in_time_valid") is True
+        freshness_valid = raw_lane.get("freshness_valid") is True
+        lane_names.append(lane_name)
+        complete = bool(
+            complete
+            and terminal_accounting_complete
+            and point_in_time_valid
+            and freshness_valid
+        )
         lanes.append(
             {
-                "asset_class": lane.asset_class.value,
+                "asset_class": lane_name,
                 "scheduled": True,
                 "catalog_count": catalog_count,
-                "deep_analyzed_count": int(lane.deep_analyzed_count),
+                "deep_analyzed_count": deep_analyzed_count,
                 "selected_count": selected_count,
                 "excluded_count": excluded_count,
                 "terminal_count": terminal_count,
                 "represented": catalog_count > 0,
                 "terminal_accounting_complete": terminal_accounting_complete,
                 "point_in_time_valid": point_in_time_valid,
-                "freshness_valid": point_in_time_valid,
+                "freshness_valid": freshness_valid,
             }
         )
 
-    complete = bool(lanes) and all_terminal and all_point_in_time
+    if len(set(lane_names)) != len(lane_names) or set(lane_names) != set(scheduled_lanes):
+        return unavailable
     represented = complete and all(item["represented"] is True for item in lanes)
     terminal = complete and v2.get("all_market_screening_certified") is True
+    policy_material = input_payload.get("policy_material")
+    discovery_fingerprint = None
+    if isinstance(policy_material, Mapping):
+        discovery_fingerprint = str(
+            input_payload.get("global_discovery_snapshot_id") or ""
+        ) or None
     return {
         "all_market_runtime_certified": complete,
         "all_market_certification_integrity_valid": complete,
@@ -390,14 +410,12 @@ def _v2_lane_audit(
         "all_market_certification_id": certification_id,
         "all_market_certification_epoch": evidence_as_of.isoformat(),
         "all_market_certification_aggregate_sha256": None,
-        "all_market_certification_discovery_manifest_fingerprint": (
-            snapshot.result.manifest_fingerprint or None
-        ),
+        "all_market_certification_discovery_manifest_fingerprint": discovery_fingerprint,
         "all_market_comprehensive_discovery_complete": complete,
         "all_market_scheduled_market_coverage_complete": represented,
         "all_market_terminal_screening_complete": terminal,
         "all_market_certified_lanes": lanes,
-        "all_market_lane_certification_source": "certification_v2_global_snapshot",
+        "all_market_lane_certification_source": "certification_v2_input_summary",
     }
 
 
@@ -488,17 +506,16 @@ def _legacy_lane_audit(values: Mapping[str, str]) -> dict[str, object]:
 def public_all_market_certification_readonly(
     values: Mapping[str, str],
 ) -> dict[str, object]:
-    """Return public audit with independent certification readable but never advanced.
+    """Return independent all-market proof without ever advancing certification.
 
-    A current-release v2 ledger is authoritative once published. Its immutable qualified
-    global snapshot supplies the lane proof; an incomplete/corrupt v2 handoff fails closed
-    instead of silently falling back to an older mutable legacy pointer. Legacy lane
-    certification remains readable only when no v2 ledger exists for the current release.
+    Once a current-release v2 ledger exists it is authoritative. Missing or corrupt compact
+    proof fails closed instead of silently inheriting a stale legacy green result. Legacy
+    compositional artifacts remain a compatibility fallback only before v2 is established.
     """
 
     base = public_all_market_certification(values)
     v2 = _readonly_v2(values)
-    if _v2_latest_ledger_path(values).exists():
+    if _v2_ledger_present(values):
         lanes = _v2_lane_audit(values, v2)
     else:
         lanes = _legacy_lane_audit(values)
