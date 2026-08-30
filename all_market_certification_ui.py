@@ -9,12 +9,12 @@ certification or authorize any investment, construction, paper, or live-money ac
 from __future__ import annotations
 
 import html
-from datetime import datetime, timezone
 from typing import Any, Callable, Mapping
 
 from operations.all_market_certification_envelope import (
     load_all_market_certification_envelope,
 )
+from ui_reporting_time import format_reporting_timestamp
 
 
 _ORIGINAL_LOADER_ATTR = "_all_market_certification_original_status_loader"
@@ -33,16 +33,7 @@ def _short(value: object, length: int = 8) -> str:
 
 
 def _when(value: object) -> str:
-    text = str(value or "").strip()
-    if not text:
-        return "cutoff unavailable"
-    try:
-        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
-    except ValueError:
-        return text
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone().strftime("%b %d, %-I:%M %p")
+    return format_reporting_timestamp(value, missing="cutoff unavailable")
 
 
 def _coverage(envelope: Mapping[str, Any]) -> tuple[int, int]:
