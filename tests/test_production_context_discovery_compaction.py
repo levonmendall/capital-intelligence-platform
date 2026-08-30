@@ -161,7 +161,7 @@ def test_bounded_tentative_portfolio_preserves_latest_history_fallback(tmp_path)
 
     assert exact is False
     assert observed.as_of == decision_as_of
-    assert observed.identifier == "portfolio:compounding:decision:20260830T120500Z"
+    assert observed.identifier == "portfolio:compounding:decision:20260830T120500000000Z"
     assert observed.cash_amount == INITIAL_PAPER_CAPITAL
     assert observed.source_identifiers == ("test-source", "context:test")
 
