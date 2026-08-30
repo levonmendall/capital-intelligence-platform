@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import os
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Mapping, MutableMapping, Sequence
 
 from operations.manual_cio_diagnostic import (
@@ -20,6 +21,8 @@ from operations.manual_cio_diagnostic import (
     latest_manual_cio_diagnostic,
     request_manual_cio_diagnostic,
 )
+
+_OWNER_LEASE_FILENAME = "manual-cio-diagnostic-owner.json"
 
 
 def _boolean(value: str | None, *, default: bool = False) -> bool:
@@ -59,6 +62,45 @@ def _log(event: str, **details: object) -> None:
     )
 
 
+def _owner_lease_path(values: Mapping[str, str]) -> Path:
+    """Resolve the same owner-lease path used by the governed diagnostic runner."""
+
+    configured = values.get("CAPITAL_INTELLIGENCE_MANUAL_CIO_DIAGNOSTIC_PATH", "").strip()
+    if configured:
+        return Path(configured).expanduser().parent / _OWNER_LEASE_FILENAME
+    data_root = Path(values.get("CAPITAL_INTELLIGENCE_DATA_DIR", "database")).expanduser()
+    return data_root / _OWNER_LEASE_FILENAME
+
+
+def _lease_payload(path: Path) -> Mapping[str, object] | None:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, Mapping) else None
+
+
+def _process_alive(pid: object) -> bool:
+    if isinstance(pid, bool):
+        return False
+    try:
+        value = int(pid)
+    except (TypeError, ValueError):
+        return False
+    return value > 0 and Path(f"/proc/{value}").exists()
+
+
+def _active_owner_exists(request_id: str, values: Mapping[str, str]) -> bool:
+    """Honor an in-progress request only while its exact owner lease is still live."""
+
+    payload = _lease_payload(_owner_lease_path(values))
+    return bool(
+        payload is not None
+        and str(payload.get("request_id") or "") == request_id
+        and _process_alive(payload.get("pid"))
+    )
+
+
 def _supersede_stale_pending_request(
     *,
     existing,
@@ -71,8 +113,7 @@ def _supersede_stale_pending_request(
     Pending coordination has never been claimed and therefore has no CIO, construction,
     or execution authority. Claiming it only so it can be durably closed preserves the
     existing append-only terminal semantics while allowing the exact current release to
-    own the single coordination slot. In-progress work is deliberately excluded here and
-    remains owned by the governed runner/recovery path.
+    own the single coordination slot.
     """
 
     claimed = claim_manual_cio_diagnostic(values=values)
@@ -113,6 +154,51 @@ def _supersede_stale_pending_request(
     )
 
 
+def _supersede_interrupted_prior_release_request(
+    *,
+    existing,
+    requester: str,
+    release: str,
+    values: MutableMapping[str, str],
+) -> None:
+    """Close prior-release claimed work only after proving its owner lease is gone.
+
+    The diagnostic runner already uses this owner lease as the durable/liveness boundary
+    when recovering an interrupted request. Reusing the same rule here prevents a dead
+    prior deployment from permanently occupying the single coordination slot while still
+    preserving any genuinely live owner. The stale request is closed fail-closed; it is
+    never reclassified as successful and cannot contribute decision or execution authority.
+    """
+
+    if _active_owner_exists(existing.request_id, values):
+        raise RuntimeError("live prior-release diagnostic owner cannot be superseded")
+
+    finished = finish_manual_cio_diagnostic(
+        existing,
+        succeeded=False,
+        cycle_key=existing.cycle_key,
+        snapshot_identifier=existing.snapshot_identifier,
+        detail=(
+            "In-progress diagnostic belonged to a prior release and no live owner lease "
+            "remained; the interrupted request was closed fail-closed so exact-release "
+            "post-prequalification coordination could proceed."
+        ),
+        values=values,
+    )
+    _log(
+        "release_diagnostic_primer_stale_in_progress_superseded",
+        release=release,
+        requested_by=requester,
+        stale_request_id=finished.request_id,
+        stale_requested_by=finished.requested_by,
+        stale_state=finished.state,
+        live_owner_observed=False,
+        handoff_complete=False,
+        decision_authority=False,
+        execution_authority=False,
+    )
+
+
 def prime_release_diagnostic_request(
     values: MutableMapping[str, str] | None = None,
 ) -> int:
@@ -128,18 +214,42 @@ def prime_release_diagnostic_request(
     requester = f"render-release:{release}"
     existing = latest_manual_cio_diagnostic(values=resolved)
 
-    # A current-release pending request is already the desired handoff. Never disturb an
-    # in-progress request: the governed diagnostic runner owns live-owner protection and
-    # interrupted-process recovery for claimed work.
+    # A current-release in-progress request is already a valid handoff. For a prior
+    # release, preserve it only while its exact process owner is still alive. An orphaned
+    # prior-release claim otherwise blocks current-release activation forever because the
+    # single-slot request store refuses a new pending request.
     if existing is not None and existing.state == "in_progress":
-        _log(
-            "release_diagnostic_primer_active_request_preserved",
+        if existing.requested_by == requester:
+            _log(
+                "release_diagnostic_primer_active_request_preserved",
+                release=release,
+                request_id=existing.request_id,
+                requested_by=existing.requested_by,
+                state=existing.state,
+                exact_release=True,
+                live_owner_required=False,
+            )
+            return 0
+        if _active_owner_exists(existing.request_id, resolved):
+            _log(
+                "release_diagnostic_primer_prior_release_live_owner_preserved",
+                release=release,
+                request_id=existing.request_id,
+                requested_by=existing.requested_by,
+                state=existing.state,
+                exact_release=False,
+                live_owner_observed=True,
+                handoff_complete=False,
+            )
+            return 0
+        _supersede_interrupted_prior_release_request(
+            existing=existing,
+            requester=requester,
             release=release,
-            request_id=existing.request_id,
-            requested_by=existing.requested_by,
-            state=existing.state,
+            values=resolved,
         )
-        return 0
+        existing = latest_manual_cio_diagnostic(values=resolved)
+
     if (
         existing is not None
         and existing.state == "pending"
