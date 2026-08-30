@@ -52,6 +52,10 @@ class CertificationRuntimeBinding:
     current_source_id: str
 
 
+def _truthy(value: object) -> bool:
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _capability_scoped_operation_enabled(values: Mapping[str, str]) -> bool:
     """Return whether this process is the independently governed operating CIO path.
 
@@ -64,8 +68,36 @@ def _capability_scoped_operation_enabled(values: Mapping[str, str]) -> bool:
 
     explicit = values.get("CAPITAL_INTELLIGENCE_CAPABILITY_SCOPED_OPERATION")
     if explicit is not None and str(explicit).strip():
-        return str(explicit).strip().lower() in {"1", "true", "yes", "on"}
-    return str(values.get("RENDER", "")).strip().lower() == "true"
+        return _truthy(explicit)
+    return _truthy(values.get("RENDER"))
+
+
+def _release_diagnostic_certification_authority_enabled(
+    values: Mapping[str, str],
+) -> bool:
+    """Recognize only the comprehensive exact-release diagnostic child as a v2 writer.
+
+    Capability-scoped serving stays read-only. The release launcher already binds these
+    child-only flags together when it intentionally runs the comprehensive all-market
+    diagnostic. Requiring the complete conjunction prevents any one discovery setting from
+    accidentally granting certification advancement authority.
+    """
+
+    return bool(
+        _capability_scoped_operation_enabled(values)
+        and _truthy(
+            values.get(
+                "CAPITAL_INTELLIGENCE_DIAGNOSTIC_ALLOW_COMPREHENSIVE_DISCOVERY"
+            )
+        )
+        and _truthy(values.get("CAPITAL_INTELLIGENCE_RUN_COMPREHENSIVE_DISCOVERY"))
+        and _truthy(values.get("CAPITAL_INTELLIGENCE_REQUIRE_COMPREHENSIVE_DISCOVERY"))
+        and _truthy(
+            values.get(
+                "CAPITAL_INTELLIGENCE_DISCOVERY_REQUIRE_COMPLETE_MARKET_COVERAGE"
+            )
+        )
+    )
 
 
 def certification_runtime_enabled(
@@ -73,22 +105,29 @@ def certification_runtime_enabled(
 ) -> bool:
     """Return whether this process owns the exhaustive all-market lineage state machine.
 
-    The capability-scoped CIO consumes a separately qualified immutable operating-evidence
-    snapshot and must not advance or wait on all-market certification stages.  Full-market
-    certification remains fail-closed and unchanged when capability-scoped operation is
-    explicitly disabled.
+    The ordinary capability-scoped CIO consumes a separately qualified immutable operating-
+    evidence snapshot and remains read-only with respect to all-market certification. The
+    exact-release comprehensive diagnostic is the narrow exception: when all of its existing
+    child-only comprehensive gates are explicitly enabled, it may persist certification-v2
+    lineage for its exact decision cutoff. Production and the qualified evidence plane are
+    still mandatory, and no investment or execution authority is granted here.
     """
 
     resolved = os.environ if values is None else values
     production = (
         str(resolved.get("CAPITAL_INTELLIGENCE_ENVIRONMENT", "")).strip().lower()
         == "production"
-        or str(resolved.get("RENDER", "")).strip().lower() == "true"
+        or _truthy(resolved.get("RENDER"))
+    )
+    capability_scoped = _capability_scoped_operation_enabled(resolved)
+    owns_certification_lineage = (
+        not capability_scoped
+        or _release_diagnostic_certification_authority_enabled(resolved)
     )
     return (
         production
         and evidence_plane_enabled(resolved)
-        and not _capability_scoped_operation_enabled(resolved)
+        and owns_certification_lineage
     )
 
 
