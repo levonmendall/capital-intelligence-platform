@@ -18,6 +18,7 @@ from ui_reporting_time import format_reporting_timestamp
 
 
 _ORIGINAL_ATTR = "_evidence_accumulation_original_command_center_html"
+_HISTORICAL_SOURCE = "Latest completed global evaluation"
 
 
 def _esc(value: object) -> str:
@@ -46,6 +47,12 @@ def _evaluation_rows(summary: Mapping[str, Any] | None) -> tuple[Mapping[str, An
 
 def _status_key(status: object) -> str:
     return str(status or "").strip().lower()
+
+
+def _is_historical_snapshot(summary: Mapping[str, Any] | None) -> bool:
+    if not isinstance(summary, Mapping):
+        return False
+    return str(summary.get("source") or "").strip() == _HISTORICAL_SOURCE
 
 
 def _summary_counts(summary: Mapping[str, Any] | None) -> dict[str, int]:
@@ -98,8 +105,28 @@ def _status_tone(status: object) -> str:
     return "warn"
 
 
-def _next_step(status: object) -> str:
+def _next_step(status: object, *, historical_snapshot: bool = False) -> str:
     normalized = _status_key(status)
+    if historical_snapshot:
+        if normalized == "evaluated":
+            return (
+                "This terminal result belongs to the latest completed snapshot; "
+                "current exact-release activity is tracked separately."
+            )
+        if normalized == "failed":
+            return (
+                "This failure belongs to the latest completed snapshot; use current "
+                "exact-release evidence before treating it as an active blocker."
+            )
+        if normalized == "in progress":
+            return (
+                "This nonterminal row belongs to the latest completed snapshot; "
+                "current exact-release activity is tracked separately."
+            )
+        return (
+            "No record is present in the latest completed snapshot; current "
+            "exact-release activity is tracked separately."
+        )
     if normalized == "evaluated":
         return "Maintain current evidence; the next governed cycle will refresh this asset class."
     if normalized == "failed":
@@ -109,7 +136,11 @@ def _next_step(status: object) -> str:
     return "Await the governed evaluation path; thresholds remain unchanged."
 
 
-def _asset_class_card(row: Mapping[str, Any]) -> str:
+def _asset_class_card(
+    row: Mapping[str, Any],
+    *,
+    historical_snapshot: bool = False,
+) -> str:
     asset_class = str(row.get("asset_class") or row.get("key") or "Unknown asset class")
     status = str(row.get("status") or "Awaiting evaluation")
     detail = str(row.get("detail") or "No additional evaluation detail is available.")
@@ -119,13 +150,31 @@ def _asset_class_card(row: Mapping[str, Any]) -> str:
     evaluated = normalized == "evaluated"
     tone = _status_tone(status)
 
+    display_status = status
+    display_detail = detail
+    represented_label = "Reached"
+    represented_subtitle = "current governed evaluation"
+    terminal_subtitle = "terminal result published"
+    evaluated_subtitle = "successful terminal evaluation"
+    if historical_snapshot:
+        represented_label = "Represented"
+        represented_subtitle = "latest completed snapshot"
+        terminal_subtitle = "completed snapshot terminal result"
+        evaluated_subtitle = "completed snapshot evaluation"
+        if normalized == "awaiting evaluation":
+            display_status = "Not in latest snapshot"
+            display_detail = (
+                "No terminal record is present for this asset class in the latest "
+                "completed snapshot."
+            )
+
     metrics = (
         ("Cataloged", _detail_count(detail, "cataloged"), "published universe count"),
         ("Deep analyzed", _detail_count(detail, "deep analyzed"), "published deep-analysis count"),
         ("Selected", _detail_count(detail, "selected"), "published selected count"),
-        ("Reached", "Yes" if reached else "No", "current governed evaluation"),
-        ("Terminal", "Yes" if terminal else "No", "terminal result published"),
-        ("Evaluated", "Yes" if evaluated else "No", "successful terminal evaluation"),
+        (represented_label, "Yes" if reached else "No", represented_subtitle),
+        ("Terminal", "Yes" if terminal else "No", terminal_subtitle),
+        ("Evaluated", "Yes" if evaluated else "No", evaluated_subtitle),
     )
     metric_html = "".join(
         '<div class="evidence-metric">'
@@ -141,10 +190,10 @@ def _asset_class_card(row: Mapping[str, Any]) -> str:
         '<div class="asset-evidence-head"><div>'
         f'<div class="asset-evidence-title">{_esc(asset_class)}</div>'
         '<div class="asset-evidence-subtitle">Comprehensive asset-class evaluation</div>'
-        f'</div><span class="evidence-status evidence-status-{tone}">{_esc(status)}</span></div>'
+        f'</div><span class="evidence-status evidence-status-{tone}">{_esc(display_status)}</span></div>'
         f'<div class="asset-evidence-metrics">{metric_html}</div>'
-        f'<div class="asset-evidence-detail">{_esc(detail)}</div>'
-        f'<div class="asset-evidence-next"><strong>Next:</strong> {_esc(_next_step(status))}</div>'
+        f'<div class="asset-evidence-detail">{_esc(display_detail)}</div>'
+        f'<div class="asset-evidence-next"><strong>Next:</strong> {_esc(_next_step(status, historical_snapshot=historical_snapshot))}</div>'
         "</article>"
     )
 
@@ -156,16 +205,27 @@ def render_evidence_accumulation(summary: Mapping[str, Any] | None) -> str:
     rows = _evaluation_rows(safe_summary)
     counts = _summary_counts(safe_summary)
     source = str(safe_summary.get("source") or "No comprehensive evaluation recorded")
+    historical_snapshot = _is_historical_snapshot(safe_summary)
     as_of = _when(safe_summary.get("as_of"))
 
-    tiles = (
-        ("Governed classes", str(counts["total"]), "complete evaluation scope"),
-        ("Reached now", f'{counts["reached"]} / {counts["total"]}', "current source has reached"),
-        ("Evaluated", f'{counts["evaluated"]} / {counts["total"]}', "successful terminal evaluation"),
-        ("In progress", str(counts["in_progress"]), "terminal result pending"),
-        ("Awaiting", str(counts["awaiting"]), "not reached by current source"),
-        ("Failed", str(counts["failed"]), "terminal blocker surfaced"),
-    )
+    if historical_snapshot:
+        tiles = (
+            ("Governed classes", str(counts["total"]), "complete evaluation scope"),
+            ("Snapshot coverage", f'{counts["reached"]} / {counts["total"]}', "represented in completed snapshot"),
+            ("Evaluated", f'{counts["evaluated"]} / {counts["total"]}', "terminal evaluations in snapshot"),
+            ("In progress", str(counts["in_progress"]), "nonterminal rows in snapshot"),
+            ("Not in snapshot", str(counts["awaiting"]), "no record in completed snapshot"),
+            ("Failed", str(counts["failed"]), "terminal blockers in snapshot"),
+        )
+    else:
+        tiles = (
+            ("Governed classes", str(counts["total"]), "complete evaluation scope"),
+            ("Reached now", f'{counts["reached"]} / {counts["total"]}', "current source has reached"),
+            ("Evaluated", f'{counts["evaluated"]} / {counts["total"]}', "successful terminal evaluation"),
+            ("In progress", str(counts["in_progress"]), "terminal result pending"),
+            ("Awaiting", str(counts["awaiting"]), "not reached by current source"),
+            ("Failed", str(counts["failed"]), "terminal blocker surfaced"),
+        )
     tile_html = "".join(
         '<div class="evidence-summary-tile">'
         f'<div class="evidence-summary-label">{_esc(label)}</div>'
@@ -174,7 +234,9 @@ def render_evidence_accumulation(summary: Mapping[str, Any] | None) -> str:
         "</div>"
         for label, value, subtitle in tiles
     )
-    cards = "".join(_asset_class_card(row) for row in rows)
+    cards = "".join(
+        _asset_class_card(row, historical_snapshot=historical_snapshot) for row in rows
+    )
     if not cards:
         cards = (
             '<article class="asset-evidence-card">'
