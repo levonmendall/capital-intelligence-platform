@@ -200,6 +200,48 @@ def _policy_material(
     }
 
 
+def _global_lane_summary(
+    snapshot: QualifiedComprehensiveDiscoverySnapshot,
+    *,
+    evidence_as_of: datetime,
+) -> list[dict[str, object]]:
+    """Compact immutable lane proof for read-only certification projection."""
+
+    cutoff = _aware(evidence_as_of, field_name="global_lane_evidence_as_of")
+    summary: list[dict[str, object]] = []
+    for lane in snapshot.result.lanes:
+        if not bool(lane.scheduled):
+            continue
+        selected_count = len(lane.selected)
+        excluded_count = len(lane.exclusions)
+        terminal_count = selected_count + excluded_count
+        point_in_time_valid = all(
+            _aware(
+                item.features.observed_at,
+                field_name="global_lane_observed_at",
+            )
+            <= cutoff
+            for item in lane.selected
+        )
+        summary.append(
+            {
+                "asset_class": lane.asset_class.value,
+                "scheduled": True,
+                "catalog_count": int(lane.catalog_count),
+                "deep_analyzed_count": int(lane.deep_analyzed_count),
+                "selected_count": selected_count,
+                "excluded_count": excluded_count,
+                "terminal_count": terminal_count,
+                "terminal_accounting_complete": (
+                    terminal_count == int(lane.catalog_count)
+                ),
+                "point_in_time_valid": point_in_time_valid,
+                "freshness_valid": point_in_time_valid,
+            }
+        )
+    return summary
+
+
 def freeze_certification_input(
     *,
     cutoff: datetime,
@@ -242,9 +284,12 @@ def freeze_certification_input(
         )
 
     try:
-        qualified_global = global_snapshot or load_qualified_comprehensive_discovery_snapshot(
-            evidence_as_of=generation.as_of,
-            values=resolved,
+        qualified_global = (
+            global_snapshot
+            or load_qualified_comprehensive_discovery_snapshot(
+                evidence_as_of=generation.as_of,
+                values=resolved,
+            )
         )
     except ComprehensiveDiscoverySnapshotError as error:
         raise CertificationInputError(
@@ -305,6 +350,10 @@ def freeze_certification_input(
     release = _release(resolved)
     policy_material = _policy_material(resolved, generation=generation)
     policy_hash = _digest(policy_material)
+    lane_summary = _global_lane_summary(
+        qualified_global,
+        evidence_as_of=generation.as_of,
+    )
     material: dict[str, object] = {
         "schema_version": _SCHEMA,
         "release": release,
@@ -317,6 +366,7 @@ def freeze_certification_input(
             "held_symbols": list(qualified_global.held_symbols),
             "tracked_symbols": list(qualified_global.tracked_symbols),
         },
+        "global_discovery_lane_summary": lane_summary,
         "us_equity_discovery_snapshot_id": qualified_equity.snapshot_id,
         "us_equity_discovery_state_scope": {
             "held_symbols": list(qualified_equity.held_symbols),
@@ -345,12 +395,7 @@ def freeze_certification_input(
     }
     record_id = _digest(material)
     payload = {**material, "record_id": record_id}
-    path = (
-        _root(resolved)
-        / "inputs"
-        / _safe(release)
-        / f"{record_id}.json"
-    )
+    path = _root(resolved) / "inputs" / _safe(release) / f"{record_id}.json"
     _immutable_json(path, payload)
 
     component_metadata = {
