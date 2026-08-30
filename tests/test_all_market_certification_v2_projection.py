@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
-from types import SimpleNamespace
 
 import operations.all_market_certification_readonly as readonly
 
@@ -26,14 +25,27 @@ def _write_input(
     *,
     release: str,
     evidence_as_of: datetime,
-    scheduled_lanes: list[str],
+    point_in_time_valid: bool = True,
 ) -> str:
+    lane = {
+        "asset_class": "us_equity",
+        "scheduled": True,
+        "catalog_count": 2,
+        "deep_analyzed_count": 2,
+        "selected_count": 1,
+        "excluded_count": 1,
+        "terminal_count": 2,
+        "terminal_accounting_complete": True,
+        "point_in_time_valid": point_in_time_valid,
+        "freshness_valid": point_in_time_valid,
+    }
     body: dict[str, object] = {
         "schema_version": "all-market-certification-input.v2",
         "release": release,
         "evidence_as_of": evidence_as_of.isoformat(),
-        "scheduled_lanes": scheduled_lanes,
+        "scheduled_lanes": ["us_equity"],
         "global_discovery_snapshot_id": "global-1",
+        "global_discovery_lane_summary": [lane],
     }
     certification_id = readonly._digest(body)
     path = (
@@ -51,43 +63,13 @@ def _write_input(
     return certification_id
 
 
-def _snapshot(evidence_as_of: datetime, *, observed_at: datetime | None = None):
-    features = SimpleNamespace(observed_at=observed_at or evidence_as_of)
-    selected = (SimpleNamespace(features=features),)
-    lane = SimpleNamespace(
-        asset_class=SimpleNamespace(value="us_equity"),
-        scheduled=True,
-        catalog_count=2,
-        deep_analyzed_count=2,
-        selected=selected,
-        exclusions=(("EXCLUDED", "screening_rejection"),),
-    )
-    result = SimpleNamespace(
-        lanes=(lane,),
-        manifest_fingerprint="manifest-1",
-    )
-    return SimpleNamespace(
-        snapshot_id="global-1",
-        evidence_as_of=evidence_as_of,
-        result=result,
-    )
-
-
-def test_v2_lane_projection_reconstructs_terminal_all_market_proof(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_v2_lane_projection_reconstructs_terminal_all_market_proof(tmp_path: Path) -> None:
     release = "release-1"
     evidence_as_of = datetime(2026, 8, 30, 18, 0, tzinfo=timezone.utc)
     certification_id = _write_input(
         tmp_path,
         release=release,
         evidence_as_of=evidence_as_of,
-        scheduled_lanes=["us_equity"],
-    )
-    monkeypatch.setattr(
-        readonly,
-        "load_qualified_comprehensive_discovery_snapshot",
-        lambda *, evidence_as_of, values: _snapshot(evidence_as_of),
     )
 
     result = readonly._v2_lane_audit(
@@ -104,7 +86,7 @@ def test_v2_lane_projection_reconstructs_terminal_all_market_proof(
     assert result["all_market_scheduled_market_coverage_complete"] is True
     assert result["all_market_terminal_screening_complete"] is True
     assert result["all_market_certification_epoch"] == evidence_as_of.isoformat()
-    assert result["all_market_lane_certification_source"] == "certification_v2_global_snapshot"
+    assert result["all_market_lane_certification_source"] == "certification_v2_input_summary"
     lane = result["all_market_certified_lanes"][0]
     assert lane["catalog_count"] == 2
     assert lane["terminal_count"] == 2
@@ -112,8 +94,8 @@ def test_v2_lane_projection_reconstructs_terminal_all_market_proof(
     assert lane["point_in_time_valid"] is True
 
 
-def test_v2_lane_projection_fails_closed_on_future_lane_evidence(
-    tmp_path: Path, monkeypatch
+def test_v2_lane_projection_fails_closed_on_invalid_point_in_time_proof(
+    tmp_path: Path,
 ) -> None:
     release = "release-1"
     evidence_as_of = datetime(2026, 8, 30, 18, 0, tzinfo=timezone.utc)
@@ -121,15 +103,7 @@ def test_v2_lane_projection_fails_closed_on_future_lane_evidence(
         tmp_path,
         release=release,
         evidence_as_of=evidence_as_of,
-        scheduled_lanes=["us_equity"],
-    )
-    monkeypatch.setattr(
-        readonly,
-        "load_qualified_comprehensive_discovery_snapshot",
-        lambda *, evidence_as_of, values: _snapshot(
-            evidence_as_of,
-            observed_at=evidence_as_of + timedelta(seconds=1),
-        ),
+        point_in_time_valid=False,
     )
 
     result = readonly._v2_lane_audit(
