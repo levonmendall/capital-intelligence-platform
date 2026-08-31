@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import timedelta
+from typing import Any
 
 from api.config import ApiSettings
 from operations.cio_after_close import (
@@ -15,7 +16,28 @@ from operations.global_opportunity_reassessment import (
 )
 
 
-MaterialCIOReassessmentEngine = GlobalOpportunityMaterialCIOReassessmentEngine
+class MaterialCIOReassessmentEngine(GlobalOpportunityMaterialCIOReassessmentEngine):
+    """Backward-compatible public facade for direct/test construction.
+
+    Historical direct callers receive the established five-minute scan and ten-minute
+    scheduled guard defaults. The production builder below explicitly overrides both
+    so live opportunity detection remains one-minute with no scheduled suppression.
+    """
+
+    def __init__(
+        self,
+        *,
+        scan_interval: timedelta = timedelta(minutes=5),
+        scheduled_guard: timedelta = timedelta(minutes=10),
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(
+            scan_interval=scan_interval,
+            scheduled_guard=scheduled_guard,
+            **kwargs,
+        )
+
+
 _OPPORTUNITY_SCAN_MAX_INTERVAL = timedelta(minutes=1)
 
 
