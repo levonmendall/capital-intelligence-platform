@@ -49,7 +49,10 @@ def _install_coordinator_child_result(
         current_stage="finalize",
     )
     terminal = latest
-    states = iter((before, terminal, terminal))
+    # The coordinator first checks whether a failed comprehensive attempt still has a live
+    # owner before ensuring/resuming the active attempt. Preserve the same running journal
+    # through that preflight and the stage-loop read, then expose the child terminal state.
+    states = iter((before, before, terminal, terminal))
     failures: list[dict[str, object]] = []
 
     monkeypatch.setattr(coordinator, "_ensure_active_attempt", lambda _values: before)
