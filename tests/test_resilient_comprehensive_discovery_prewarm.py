@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
 from operations import epoch_scoped_provider_acquisition as acquisition
 from operations import resilient_comprehensive_discovery_prewarm as resilient
@@ -110,6 +111,47 @@ def test_repeated_failures_never_exceed_bounded_pass_count(monkeypatch) -> None:
         values={"RENDER": "true"},
         decision_epoch=EPOCH,
         original=fake_original,
+    )
+
+    assert len(calls) == resilient._MAX_PROVIDER_PASSES
+    assert result["provider_retry_passes"] == resilient._MAX_PROVIDER_PASSES
+    assert result["provider_retry_budget_extended"] is False
+
+
+def test_composed_runtime_has_only_one_provider_retry_owner(monkeypatch) -> None:
+    from operations import comprehensive_discovery_input_spool as spool
+    from operations import evidence_state_scope as scope_module
+
+    calls = []
+    monkeypatch.setattr(resilient._base, "_eligible", lambda values: True)
+    monkeypatch.setattr(acquisition, "_fanout_budget_seconds", lambda *args, **kwargs: 300.0)
+    monkeypatch.setattr(
+        scope_module,
+        "load_evidence_state_scope",
+        lambda **kwargs: SimpleNamespace(held_symbols=(), tracked_symbols=()),
+    )
+    monkeypatch.setattr(
+        spool,
+        "prepare_request",
+        lambda **kwargs: SimpleNamespace(path="request.json"),
+    )
+
+    def always_fail(request_path, *, values, decision_epoch):
+        del request_path, values, decision_epoch
+        calls.append(1)
+        return {
+            "failed": 1,
+            "provider_skipped_budget": 0,
+            "structural_prewarm_failed": 0,
+            "structural_prewarm_skipped_budget": 0,
+            "completed": 12,
+        }
+
+    monkeypatch.setattr(acquisition, "run_provider_acquisition_fanout", always_fail)
+
+    result = resilient.prewarm_epoch_provider_inputs(
+        evidence_as_of=EPOCH,
+        values={"RENDER": "true"},
     )
 
     assert len(calls) == resilient._MAX_PROVIDER_PASSES
