@@ -25,6 +25,7 @@ from operations.current_asset_class_evaluation_status import (
     load_latest_completed_asset_class_evaluation,
 )
 from operations.manual_cio_diagnostic import latest_manual_cio_diagnostic
+from operations.release_production_state import load_release_production_state
 
 
 _SCHEMA_VERSION = "production-state-envelope.v1"
@@ -60,7 +61,40 @@ def _production_status(
     observed_at: datetime,
 ) -> dict[str, object]:
     release = _release(values)
-    diagnostic = latest_manual_cio_diagnostic(values=values)
+    expected_requester = f"render-release:{release}"
+
+    # The exact-release pointer is canonical for presentation. The global manual diagnostic
+    # remains a single-flight coordination file and can legitimately advance to another
+    # release after this release has completed. Never let that later write erase exact-release
+    # production truth from the current UI.
+    diagnostic = load_release_production_state(release, values=values)
+    if diagnostic is None:
+        global_diagnostic = latest_manual_cio_diagnostic(values=values)
+        if (
+            global_diagnostic is not None
+            and release != "unknown"
+            and global_diagnostic.requested_by == expected_requester
+        ):
+            # Backward-compatible exact-release fallback for a deployment created before the
+            # scoped pointer existed. An unrelated global diagnostic is never promoted to
+            # current production truth.
+            diagnostic = global_diagnostic
+        elif global_diagnostic is not None:
+            return {
+                "state": "stale_release",
+                "stage": None,
+                "detail": "The latest durable diagnostic belongs to a different release and no exact-release production pointer is available.",
+                "request_id": global_diagnostic.request_id,
+                "cycle_key": global_diagnostic.cycle_key,
+                "started_at": _iso(global_diagnostic.started_at),
+                "completed_at": _iso(global_diagnostic.completed_at),
+                "progress_recorded_at": _iso(
+                    getattr(global_diagnostic, "progress_recorded_at", None)
+                ),
+                "release_matches": False,
+                "observed_at": observed_at.isoformat(),
+            }
+
     if diagnostic is None:
         return {
             "state": "not_recorded",
@@ -75,13 +109,14 @@ def _production_status(
             "observed_at": observed_at.isoformat(),
         }
 
-    expected_requester = f"render-release:{release}"
     release_matches = release != "unknown" and diagnostic.requested_by == expected_requester
     if not release_matches:
+        # load_release_production_state already validates this invariant. Keep the guard
+        # fail-closed in case a custom/test implementation violates the reader contract.
         return {
             "state": "stale_release",
             "stage": None,
-            "detail": "The latest durable diagnostic belongs to a different release.",
+            "detail": "The exact-release production pointer is not bound to this release.",
             "request_id": diagnostic.request_id,
             "cycle_key": diagnostic.cycle_key,
             "started_at": _iso(diagnostic.started_at),
