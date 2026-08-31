@@ -282,7 +282,20 @@ def _persist_enriched_payload(
 
 
 def install(memory_safe_module) -> None:
-    """Install the telemetry #712 bridge on the Render bootstrap module."""
+    """Install safe failure telemetry plus post-#881 production isolation repairs."""
+
+    # These two repairs must be live before the release prequalification thread starts.
+    # Install them independently of the telemetry bridge's own idempotency flag so a
+    # partially preinstalled test/runtime composition cannot silently omit either fix.
+    from operations.release_prequalification_stderr_isolation import (
+        install as install_release_prequalification_stderr_isolation,
+    )
+    from operations.resilient_comprehensive_discovery_prewarm import (
+        install as install_resilient_comprehensive_discovery_prewarm,
+    )
+
+    install_release_prequalification_stderr_isolation(memory_safe_module)
+    install_resilient_comprehensive_discovery_prewarm()
 
     global _latest_context
     if getattr(memory_safe_module, _INSTALLED_ATTR, False):
