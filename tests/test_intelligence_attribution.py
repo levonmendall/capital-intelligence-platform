@@ -1,18 +1,13 @@
 from datetime import datetime, timezone
 
+from cio import SpecialistRole
 from evaluation.committee_cio_trace import CommitteeCIOInformationTrace
 from evaluation.intelligence_attribution import build_cycle_intelligence_attribution
 
 
 _AS_OF = datetime(2026, 8, 30, 18, 0, tzinfo=timezone.utc)
-_REQUIRED_ROLES = (
-    "macro_economic",
-    "market",
-    "cross_asset_forecast",
-    "fundamental_valuation",
-    "portfolio_risk",
-    "evidence_governance",
-)
+_REQUIRED_ROLES = tuple(role.value for role in SpecialistRole)
+_MARKET_ROLE = SpecialistRole.MARKET.value
 
 
 def _trace(
@@ -24,9 +19,9 @@ def _trace(
     cio_action="hold",
 ):
     specialists = []
-    roles = _REQUIRED_ROLES if include_all_specialists else ("market",)
+    roles = _REQUIRED_ROLES if include_all_specialists else (_MARKET_ROLE,)
     for role in roles:
-        origins = specialist_origins if role == "market" else ()
+        origins = specialist_origins if role == _MARKET_ROLE else ()
         specialists.append(
             {
                 "role": role,
@@ -69,7 +64,7 @@ def test_observed_evidence_is_attributed_to_specialist_and_cio():
     assert item.evidence_produced is True
     assert item.evidence_identifiers == (evidence_id,)
     assert item.candidate_identifiers == ("candidate:BTC",)
-    assert item.specialist_roles_consuming == ("market",)
+    assert item.specialist_roles_consuming == (_MARKET_ROLE,)
     assert item.reached_cio is True
     assert item.material_decision_influence == "not_counterfactually_observable"
     assert item.role == "advisory"
