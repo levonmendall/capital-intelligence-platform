@@ -23,7 +23,9 @@ def test_unresolved_provider_lane_replays_inside_original_budget(monkeypatch, tm
     monkeypatch.setattr(
         acquisition,
         "_fanout_budget_seconds",
-        lambda decision_epoch, values: 10.0,
+        # 42 governed spare seconds leave the same 10-second replay window after the
+        # separate 30-second operational handoff + 2-second cleanup reserve.
+        lambda decision_epoch, values: 42.0,
     )
 
     def fake_fanout(request_path, *, values, decision_epoch):
@@ -66,6 +68,9 @@ def test_unresolved_provider_lane_replays_inside_original_budget(monkeypatch, tm
     assert result["provider_replay_final_unresolved"] == 0
     assert result["provider_replay_initial_budget_seconds"] == 10.0
     assert result["provider_replay_remaining_budget_seconds"] == 4.0
+    assert result["provider_prewarm_governed_budget_seconds"] == 42.0
+    assert result["provider_prewarm_handoff_margin_seconds"] == 30.0
+    assert result["provider_prewarm_cleanup_reserve_seconds"] == 2.0
 
 
 def test_structural_skip_is_treated_as_unresolved_and_replayed(monkeypatch, tmp_path) -> None:
@@ -76,7 +81,7 @@ def test_structural_skip_is_treated_as_unresolved_and_replayed(monkeypatch, tmp_
     monkeypatch.setattr(
         acquisition,
         "_fanout_budget_seconds",
-        lambda decision_epoch, values: 8.0,
+        lambda decision_epoch, values: 40.0,
     )
 
     def fake_fanout(request_path, *, values, decision_epoch):
@@ -127,7 +132,7 @@ def test_replay_does_not_extend_exhausted_original_window(monkeypatch, tmp_path)
     monkeypatch.setattr(
         acquisition,
         "_fanout_budget_seconds",
-        lambda decision_epoch, values: 7.0,
+        lambda decision_epoch, values: 39.0,
     )
 
     def fake_fanout(request_path, *, values, decision_epoch):
@@ -197,6 +202,8 @@ def test_provider_ceiling_is_restored_when_fanout_raises(monkeypatch, tmp_path) 
 
 def test_governed_provider_limits_remain_unchanged() -> None:
     assert overlap._PROVIDER_REPLAY_LIMIT == 1
+    assert overlap._OPERATIONAL_HANDOFF_MARGIN_SECONDS == 30.0
+    assert overlap._COMPLETION_CLEANUP_RESERVE_SECONDS == 2.0
     assert acquisition._MAX_FANOUT_SECONDS == 300.0
     assert acquisition._DOWNSTREAM_RESERVE_SECONDS == 480.0
     assert acquisition._DEFAULT_WORKERS == 6
