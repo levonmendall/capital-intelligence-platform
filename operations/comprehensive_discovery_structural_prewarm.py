@@ -99,7 +99,8 @@ def _run_epoch_provider_fanout_with_bounded_replay(
     The first call's epoch-derived budget becomes one absolute monotonic window. Any replay
     temporarily narrows the acquisition module's existing 300-second ceiling to only the
     time left in that window. The sidecar is a single-threaded finite process, and the
-    original module constant is restored around every call, including failures.
+    original module constant is restored around every call, including failures. When no
+    replay is needed, the original fanout report is returned unchanged for compatibility.
     """
 
     from operations import epoch_scoped_provider_acquisition as acquisition
@@ -142,18 +143,15 @@ def _run_epoch_provider_fanout_with_bounded_replay(
             "reason": "provider_acquisition_unavailable",
             "completed": 0,
             "failed": 0,
-            "provider_replay_attempted": False,
-            "provider_replay_count": 0,
-            "provider_replay_bounded": True,
-            "provider_replay_initial_budget_seconds": round(initial_budget, 3),
-            "provider_replay_remaining_budget_seconds": 0.0,
         }
+    if len(reports) == 1:
+        return dict(reports[0])
 
     final = dict(reports[-1])
     final.update(
         {
-            "provider_replay_attempted": len(reports) > 1,
-            "provider_replay_count": max(0, len(reports) - 1),
+            "provider_replay_attempted": True,
+            "provider_replay_count": len(reports) - 1,
             "provider_replay_bounded": True,
             "provider_replay_initial_unresolved": _unresolved_provider_lanes(reports[0]),
             "provider_replay_final_unresolved": _unresolved_provider_lanes(reports[-1]),
