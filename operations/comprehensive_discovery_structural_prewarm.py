@@ -25,12 +25,13 @@ certification-node construction, market-evidence qualification, durable transact
 and global certification. It may validate and consume an exact-epoch provider publication
 but must never start a second late provider-network fallback.
 
-The sidecar is advisory and bounded by the same provider-acquisition window that existed
-before this overlap. The U.S.-equity stage may use otherwise idle time while the sidecar is
-running, then waits only until that original absolute acceleration deadline and always
-reaps the child before publishing its stage result. Neither this sidecar nor its provider
-fanout has evidence, candidate, sizing, construction, execution, CIO, or real-money
-authority.
+The sidecar is advisory and bounded inside the same provider-acquisition window. It now
+surrenders the window with a separate 30-second operational handoff margin, plus bounded
+cleanup time, before the unchanged 480-second downstream reserve is reached. That margin is
+for cache release, process exit, interpreter startup, and stage journal handoff only; it does
+not extend the 900-second evidence lifetime, the 300-second acceleration ceiling, or weaken
+the 480-second governed reserve. Neither this sidecar nor its provider fanout has evidence,
+candidate, sizing, construction, execution, CIO, or real-money authority.
 """
 
 from __future__ import annotations
@@ -51,6 +52,10 @@ from cio import CandidateAssetClass
 _MODULE = "operations.comprehensive_discovery_structural_prewarm"
 _STOP_GRACE_SECONDS = 1.0
 _COMPLETION_CLEANUP_RESERVE_SECONDS = 2.0 * _STOP_GRACE_SECONDS
+_OPERATIONAL_HANDOFF_MARGIN_SECONDS = 30.0
+_EARLY_OWNER_RESERVE_SECONDS = (
+    _OPERATIONAL_HANDOFF_MARGIN_SECONDS + _COMPLETION_CLEANUP_RESERVE_SECONDS
+)
 _PROVIDER_REPLAY_LIMIT = 1
 _REFERENCE_MANIFEST_ID_ENV = "CAPITAL_INTELLIGENCE_REFERENCE_MANIFEST_ID"
 _REFERENCE_MANIFEST_PATH_ENV = "CAPITAL_INTELLIGENCE_REFERENCE_MANIFEST_PATH"
@@ -96,22 +101,24 @@ def _run_epoch_provider_fanout_with_bounded_replay(
 ) -> Mapping[str, object]:
     """Replay unresolved early provider work once without extending its first budget.
 
-    The first call's epoch-derived budget becomes one absolute monotonic window. Any replay
-    temporarily narrows the acquisition module's existing 300-second ceiling to only the
-    time left in that window. The sidecar is a single-threaded finite process, and the
-    original module constant is restored around every call, including failures. When no
-    replay is needed, the original fanout report is returned unchanged for compatibility.
+    The first call's epoch-derived budget becomes one absolute monotonic window after the
+    operational handoff/cleanup reserve is removed. Any replay temporarily narrows the
+    acquisition module's existing 300-second ceiling to only the time left in that window.
+    The sidecar is a single-threaded finite process, and the original module constant is
+    restored around every call, including failures.
     """
 
     from operations import epoch_scoped_provider_acquisition as acquisition
 
     resolved = dict(values)
     try:
-        initial_budget = max(
+        governed_budget = max(
             0.0,
             float(acquisition._fanout_budget_seconds(decision_epoch, resolved)),
         )
+        initial_budget = max(0.0, governed_budget - _EARLY_OWNER_RESERVE_SECONDS)
     except (OSError, RuntimeError, TypeError, ValueError):
+        governed_budget = 0.0
         initial_budget = 0.0
     deadline = time.monotonic() + initial_budget
     original_ceiling = float(acquisition._MAX_FANOUT_SECONDS)
@@ -145,7 +152,11 @@ def _run_epoch_provider_fanout_with_bounded_replay(
             "failed": 0,
         }
     if len(reports) == 1:
-        return dict(reports[0])
+        result = dict(reports[0])
+        result.setdefault("provider_prewarm_governed_budget_seconds", round(governed_budget, 3))
+        result.setdefault("provider_prewarm_handoff_margin_seconds", _OPERATIONAL_HANDOFF_MARGIN_SECONDS)
+        result.setdefault("provider_prewarm_cleanup_reserve_seconds", _COMPLETION_CLEANUP_RESERVE_SECONDS)
+        return result
 
     final = dict(reports[-1])
     final.update(
@@ -160,6 +171,9 @@ def _run_epoch_provider_fanout_with_bounded_replay(
                 max(0.0, deadline - time.monotonic()),
                 3,
             ),
+            "provider_prewarm_governed_budget_seconds": round(governed_budget, 3),
+            "provider_prewarm_handoff_margin_seconds": _OPERATIONAL_HANDOFF_MARGIN_SECONDS,
+            "provider_prewarm_cleanup_reserve_seconds": _COMPLETION_CLEANUP_RESERVE_SECONDS,
         }
     )
     return final
@@ -197,7 +211,7 @@ class StructuralPrewarmHandle:
             pass
 
     def finish(self) -> None:
-        """Let the sidecar finish only inside its original absolute acceleration window."""
+        """Let the sidecar finish only inside its reduced absolute acceleration window."""
 
         process = self.process
         if process is None:
@@ -239,13 +253,10 @@ def start_render_structural_prewarm(
         budget = float(_fanout_budget_seconds(timestamp, resolved))
     except (OSError, RuntimeError, TypeError, ValueError):
         budget = 0.0
-    # The child is the canonical owner of the provider budget and independently applies
-    # the unchanged evidence lifetime, 300-second ceiling, and 480-second downstream
-    # reserve before any provider I/O. Keep the launcher contract stable even when the
-    # current epoch has no spare acquisition time: the subordinate child may still start,
-    # observe a zero budget, and exit without provider work. The parent deadline never
-    # extends that budget and reserves cleanup time only when spare budget actually exists.
-    usable_budget = max(0.0, budget - _COMPLETION_CLEANUP_RESERVE_SECONDS)
+    # The child still applies the unchanged evidence lifetime, 300-second ceiling, and
+    # 480-second downstream reserve. The early owner stops sooner: bounded cleanup plus a
+    # 30-second operational handoff margin are subtracted from only its advisory window.
+    usable_budget = max(0.0, budget - _EARLY_OWNER_RESERVE_SECONDS)
     deadline = time.monotonic() + usable_budget
 
     environment = dict(os.environ)
