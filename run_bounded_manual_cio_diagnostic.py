@@ -43,6 +43,9 @@ from operations.qualified_evidence_maintenance import (
 from operations.streaming_file_cache_reclamation import (
     release_streaming_clean_file_cache,
 )
+from operations.working_set_file_cache_reclamation import (
+    should_reclaim_file_backed_working_set,
+)
 from providers.cme_futures_reference_executable import (
     CmeExecutableFuturesReferenceProvider,
 )
@@ -110,15 +113,21 @@ def _wait_with_reclaimable_bounds(process, **kwargs):
     live ``memory.stat`` from another cgroup. Normal production keeps the original readers
     and therefore always uses the reclaimable-aware dual guard.
 
-    When cgroup-v2 ``memory.reclaim`` exists but cannot actually reclaim the raw-only file
+    The cgroup working-set estimate intentionally includes active file cache. When that
+    active-file ownership alone can explain a working-set crossing while the conservative
+    non-file remainder remains below the unchanged governed boundary, make one bounded
+    streaming clean-file pass and immediately remeasure. Genuine non-file/anonymous
+    pressure is never granted this path and still terminates fail-closed at the same limit.
+
+    When cgroup-v2 ``memory.reclaim`` exists but cannot actually reclaim raw-only file
     cache, make one bounded streaming clean-file pass before the unchanged hard ceiling is
-    allowed to terminate the child. The fallback is attempted only for raw-only pressure,
-    never working-set pressure, and cannot change any resource boundary.
+    allowed to terminate the child. Neither recovery path changes a resource boundary.
 
     The guard's credential-safe trigger/peak record is also retained on the shared core
     module for the caller that owns the bounded child. This does not alter the historical
     five-value wait contract, so every existing worker remains compatible while release
-    telemetry can distinguish real working-set pressure from the independent raw hard cap.
+    telemetry can distinguish real working-set pressure from reclaimable file cache and the
+    independent raw hard cap.
     """
 
     if (
@@ -136,7 +145,9 @@ def _wait_with_reclaimable_bounds(process, **kwargs):
     captured: dict[str, object] = {}
     original_log = _reclaimable_guard._safe_log
     original_reclaim = _reclaimable_guard._attempt_cgroup_v2_reclaim
+    original_memory_snapshot = _reclaimable_guard.memory_snapshot
     fallback_used = False
+    working_set_file_cache_fallback_used = False
 
     def capture(event: str, **details: object) -> None:
         if event == "reclaimable_memory_guard_triggered":
@@ -148,7 +159,87 @@ def _wait_with_reclaimable_bounds(process, **kwargs):
         elif event == "reclaimable_memory_guard_file_cache_fallback":
             captured.update(details)
             captured["file_cache_fallback_observed"] = True
+        elif event == "reclaimable_memory_guard_working_set_file_cache_fallback":
+            captured.update(details)
+            captured["working_set_file_cache_fallback_observed"] = True
         original_log(event, **details)
+
+    def memory_snapshot_with_file_cache_fallback(values=None):
+        nonlocal working_set_file_cache_fallback_used
+        snapshot = original_memory_snapshot(values)
+        if working_set_file_cache_fallback_used or snapshot.limit_kib is None:
+            return snapshot
+
+        resolved_values = kwargs.get("values") if values is None else values
+        if not isinstance(resolved_values, Mapping):
+            resolved_values = {}
+        reserve_kib = kwargs.get("memory_reserve_kib")
+        if reserve_kib is None:
+            reserve_kib = 640 * 1024
+        working_set_fraction = kwargs.get("memory_high_water_fraction")
+        if working_set_fraction is None:
+            working_set_fraction = 0.70
+        boundaries = _reclaimable_guard.memory_boundaries(
+            snapshot.limit_kib,
+            working_set_fraction=float(working_set_fraction),
+            working_set_reserve_kib=int(reserve_kib),
+            values=resolved_values,
+        )
+        if _reclaimable_guard.limit_reason(snapshot, boundaries) != "working_set":
+            return snapshot
+        if not should_reclaim_file_backed_working_set(snapshot, boundaries):
+            return snapshot
+
+        working_set_file_cache_fallback_used = True
+        fallback_error_type: str | None = None
+        try:
+            report = release_streaming_clean_file_cache(resolved_values)
+        except Exception as error:  # noqa: BLE001 - operational fallback stays fail-soft.
+            report = {}
+            fallback_error_type = type(error).__name__
+        after = original_memory_snapshot(values)
+        before_raw = snapshot.raw_current_kib
+        after_raw = after.raw_current_kib
+        before_working = snapshot.working_set_kib
+        after_working = after.working_set_kib
+        raw_reclaimed = (
+            max(0, int(before_raw) - int(after_raw))
+            if isinstance(before_raw, int) and isinstance(after_raw, int)
+            else 0
+        )
+        working_set_reclaimed = (
+            max(0, int(before_working) - int(after_working))
+            if isinstance(before_working, int) and isinstance(after_working, int)
+            else 0
+        )
+        effective = _reclaimable_guard.limit_reason(after, boundaries) is None
+        capture(
+            "reclaimable_memory_guard_working_set_file_cache_fallback",
+            memory_working_set_file_cache_fallback_attempted=True,
+            memory_working_set_file_cache_fallback_supported=bool(report.get("supported")),
+            memory_working_set_file_cache_fallback_scan_entries=report.get("scan_entries"),
+            memory_working_set_file_cache_fallback_released_file_count=report.get(
+                "released_file_count"
+            ),
+            memory_working_set_file_cache_fallback_released_bytes=report.get(
+                "released_bytes"
+            ),
+            memory_working_set_file_cache_fallback_raw_before_kib=before_raw,
+            memory_working_set_file_cache_fallback_raw_after_kib=after_raw,
+            memory_working_set_file_cache_fallback_working_set_before_kib=before_working,
+            memory_working_set_file_cache_fallback_working_set_after_kib=after_working,
+            memory_working_set_file_cache_fallback_active_file_before_kib=snapshot.active_file_kib,
+            memory_working_set_file_cache_fallback_active_file_after_kib=after.active_file_kib,
+            memory_working_set_file_cache_fallback_anon_before_kib=snapshot.anon_kib,
+            memory_working_set_file_cache_fallback_anon_after_kib=after.anon_kib,
+            memory_working_set_file_cache_fallback_raw_reclaimed_kib=raw_reclaimed,
+            memory_working_set_file_cache_fallback_reclaimed_kib=working_set_reclaimed,
+            memory_working_set_file_cache_fallback_effective=effective,
+            memory_working_set_file_cache_fallback_error_type=fallback_error_type,
+            working_set_boundary_kib=boundaries.working_set_kib,
+            raw_hard_boundary_kib=boundaries.raw_hard_kib,
+        )
+        return after
 
     def reclaim_with_file_cache_fallback(snapshot, boundaries, *, values):
         nonlocal fallback_used
@@ -173,7 +264,7 @@ def _wait_with_reclaimable_bounds(process, **kwargs):
         except Exception as error:  # noqa: BLE001 - operational fallback stays fail-soft.
             report = {}
             fallback_error_type = type(error).__name__
-        fallback_after = _reclaimable_guard.memory_snapshot(values)
+        fallback_after = original_memory_snapshot(values)
         before_raw = after.raw_current_kib
         after_raw = fallback_after.raw_current_kib
         fallback_reclaimed = (
@@ -226,12 +317,14 @@ def _wait_with_reclaimable_bounds(process, **kwargs):
 
     _reclaimable_guard._safe_log = capture
     _reclaimable_guard._attempt_cgroup_v2_reclaim = reclaim_with_file_cache_fallback
+    _reclaimable_guard.memory_snapshot = memory_snapshot_with_file_cache_fallback
     try:
         result = _reclaimable_guard.wait_with_reclaimable_resource_bounds(
             process,
             **kwargs,
         )
     finally:
+        _reclaimable_guard.memory_snapshot = original_memory_snapshot
         _reclaimable_guard._attempt_cgroup_v2_reclaim = original_reclaim
         _reclaimable_guard._safe_log = original_log
     captured.setdefault("memory_limited", bool(result[2]))
