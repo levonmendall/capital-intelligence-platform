@@ -14,6 +14,12 @@ stage will use, then delegates structural preparation and provider I/O to the ex
 300-second acceleration ceiling, six-worker cap, evidence lifetime, and 480-second downstream
 reserve. Provider children atomically promote only clean, limitation-free publications.
 
+The early owner may make one bounded replay when its first fanout leaves unresolved lanes.
+The replay consumes only time left inside the first fanout's original absolute acquisition
+window and reconstructs work in fresh finite children, so a transient provider or child
+failure cannot strand an otherwise valid exact-epoch publication while no failed attempt's
+heavy object graph is retained. The replay never extends or resets the provider budget.
+
 The later serialized comprehensive transaction still owns terminal screening,
 certification-node construction, market-evidence qualification, durable transaction state,
 and global certification. It may validate and consume an exact-epoch provider publication
@@ -45,6 +51,7 @@ from cio import CandidateAssetClass
 _MODULE = "operations.comprehensive_discovery_structural_prewarm"
 _STOP_GRACE_SECONDS = 1.0
 _COMPLETION_CLEANUP_RESERVE_SECONDS = 2.0 * _STOP_GRACE_SECONDS
+_PROVIDER_REPLAY_LIMIT = 1
 _REFERENCE_MANIFEST_ID_ENV = "CAPITAL_INTELLIGENCE_REFERENCE_MANIFEST_ID"
 _REFERENCE_MANIFEST_PATH_ENV = "CAPITAL_INTELLIGENCE_REFERENCE_MANIFEST_PATH"
 
@@ -66,6 +73,96 @@ def _eligible(values: Mapping[str, str]) -> bool:
         and str(values.get(_REFERENCE_MANIFEST_ID_ENV) or "").strip()
         and str(values.get(_REFERENCE_MANIFEST_PATH_ENV) or "").strip()
     )
+
+
+def _unresolved_provider_lanes(report: Mapping[str, object]) -> int:
+    """Return conservative unresolved lane count from one advisory fanout report."""
+
+    try:
+        scheduled = max(0, int(report.get("scheduled_lanes", 0)))
+        completed = max(0, int(report.get("completed", 0)))
+        failed = max(0, int(report.get("failed", 0)))
+        skipped = max(0, int(report.get("provider_skipped_lanes", 0)))
+    except (TypeError, ValueError):
+        return 1
+    return max(failed, skipped, max(0, scheduled - completed))
+
+
+def _run_epoch_provider_fanout_with_bounded_replay(
+    request_path: str | Path,
+    *,
+    values: Mapping[str, str],
+    decision_epoch: datetime,
+) -> Mapping[str, object]:
+    """Replay unresolved early provider work once without extending its first budget.
+
+    The first call's epoch-derived budget becomes one absolute monotonic window. Any replay
+    temporarily narrows the acquisition module's existing 300-second ceiling to only the
+    time left in that window. The sidecar is a single-threaded finite process, and the
+    original module constant is restored around every call, including failures. When no
+    replay is needed, the original fanout report is returned unchanged for compatibility.
+    """
+
+    from operations import epoch_scoped_provider_acquisition as acquisition
+
+    resolved = dict(values)
+    try:
+        initial_budget = max(
+            0.0,
+            float(acquisition._fanout_budget_seconds(decision_epoch, resolved)),
+        )
+    except (OSError, RuntimeError, TypeError, ValueError):
+        initial_budget = 0.0
+    deadline = time.monotonic() + initial_budget
+    original_ceiling = float(acquisition._MAX_FANOUT_SECONDS)
+    reports: list[Mapping[str, object]] = []
+
+    for attempt in range(_PROVIDER_REPLAY_LIMIT + 1):
+        remaining = max(0.0, deadline - time.monotonic())
+        if attempt > 0:
+            if not reports or _unresolved_provider_lanes(reports[-1]) <= 0 or remaining <= 0.0:
+                break
+
+        # A zero-budget first call intentionally preserves the acquisition owner's existing
+        # downstream-reserve report rather than inventing a different sidecar result.
+        cap = min(original_ceiling, remaining)
+        acquisition._MAX_FANOUT_SECONDS = cap
+        try:
+            report = acquisition.run_provider_acquisition_fanout(
+                request_path,
+                values=resolved,
+                decision_epoch=decision_epoch,
+            )
+        finally:
+            acquisition._MAX_FANOUT_SECONDS = original_ceiling
+        reports.append(dict(report))
+
+    if not reports:
+        return {
+            "attempted": False,
+            "reason": "provider_acquisition_unavailable",
+            "completed": 0,
+            "failed": 0,
+        }
+    if len(reports) == 1:
+        return dict(reports[0])
+
+    final = dict(reports[-1])
+    final.update(
+        {
+            "provider_replay_attempted": True,
+            "provider_replay_count": len(reports) - 1,
+            "provider_replay_bounded": True,
+            "provider_replay_initial_unresolved": _unresolved_provider_lanes(reports[0]),
+            "provider_replay_final_unresolved": _unresolved_provider_lanes(reports[-1]),
+            "provider_replay_initial_budget_seconds": round(initial_budget, 3),
+            "provider_replay_remaining_budget_seconds": round(
+                max(0.0, deadline - time.monotonic()),
+                3,
+            ),
+        }
+    )
+    return final
 
 
 @dataclass(slots=True)
@@ -297,9 +394,6 @@ def prewarm_epoch_provider_inputs(
     from operations import comprehensive_market_discovery as facade
     from operations.comprehensive_discovery_input_spool import prepare_request
     from operations.evidence_state_scope import load_evidence_state_scope
-    from operations.epoch_scoped_provider_acquisition import (
-        run_provider_acquisition_fanout,
-    )
 
     scope = load_evidence_state_scope(as_of=timestamp, values=resolved)
     policy = facade._core.ComprehensiveMarketDiscoveryPolicy()
@@ -311,7 +405,7 @@ def prewarm_epoch_provider_inputs(
         excluded_symbols=(),
         policy=policy,
     )
-    return run_provider_acquisition_fanout(
+    return _run_epoch_provider_fanout_with_bounded_replay(
         request.path,
         values=resolved,
         decision_epoch=timestamp,
