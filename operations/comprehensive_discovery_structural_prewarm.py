@@ -18,7 +18,10 @@ The early owner may make one bounded replay when its first fanout leaves unresol
 The replay consumes only time left inside the first fanout's original absolute acquisition
 window and reconstructs work in fresh finite children, so a transient provider or child
 failure cannot strand an otherwise valid exact-epoch publication while no failed attempt's
-heavy object graph is retained. The replay never extends or resets the provider budget.
+heavy object graph is retained. When an exact-request publication is absent, replay targets
+that missing lane before already-published lanes; if no file-level gap can be identified,
+it falls back to the complete canonical lane schedule. The replay never extends or resets
+the provider budget.
 
 The later serialized comprehensive transaction still owns terminal screening,
 certification-node construction, market-evidence qualification, durable transaction state,
@@ -93,6 +96,45 @@ def _unresolved_provider_lanes(report: Mapping[str, object]) -> int:
     return max(failed, skipped, max(0, scheduled - completed))
 
 
+def _provider_replay_lane_items(
+    request_path: str | Path,
+    *,
+    acquisition,
+    decision_epoch: datetime,
+) -> tuple[tuple[int, CandidateAssetClass], ...]:
+    """Prioritize absent exact-request publications without weakening later validation.
+
+    This is only a replay scheduling hint. A regular non-symlink file at the canonical
+    exact-request path is not treated as evidence or as a validated publication; the
+    provider child and later transactional lane still perform the existing integrity,
+    fingerprint, limitation, and epoch checks. If every canonical path exists even though
+    the previous fanout reported unresolved work, replay falls back to the complete lane
+    schedule so an invalid existing artifact can still be rebuilt inside the original
+    legal provider window.
+    """
+
+    lane_items = tuple(acquisition._scheduled_lane_items(decision_epoch))
+    directory = Path(request_path).expanduser().parent
+    missing: list[tuple[int, CandidateAssetClass]] = []
+    for index, asset_class in lane_items:
+        # Mirrors transactional_comprehensive_discovery_lane._publication_path without
+        # importing that heavy canonical transaction stack into this lightweight sidecar.
+        publication_path = directory / (
+            f"provider-preselection-{index:03d}-{asset_class.value}.json"
+        )
+        try:
+            ready_hint = (
+                publication_path.is_file()
+                and not publication_path.is_symlink()
+                and publication_path.stat().st_size > 0
+            )
+        except OSError:
+            ready_hint = False
+        if not ready_hint:
+            missing.append((index, asset_class))
+    return tuple(missing or lane_items)
+
+
 def _run_epoch_provider_fanout_with_bounded_replay(
     request_path: str | Path,
     *,
@@ -104,8 +146,8 @@ def _run_epoch_provider_fanout_with_bounded_replay(
     The first call's epoch-derived budget becomes one absolute monotonic window after the
     operational handoff/cleanup reserve is removed. Any replay temporarily narrows the
     acquisition module's existing 300-second ceiling to only the time left in that window.
-    The sidecar is a single-threaded finite process, and the original module constant is
-    restored around every call, including failures.
+    The sidecar is a single-threaded finite process, and the original module constants and
+    canonical lane schedule are restored around every call, including failures.
     """
 
     from operations import epoch_scoped_provider_acquisition as acquisition
@@ -122,18 +164,29 @@ def _run_epoch_provider_fanout_with_bounded_replay(
         initial_budget = 0.0
     deadline = time.monotonic() + initial_budget
     original_ceiling = float(acquisition._MAX_FANOUT_SECONDS)
+    original_schedule = acquisition._scheduled_lane_items
     reports: list[Mapping[str, object]] = []
+    replay_targeted_lanes: int | None = None
 
     for attempt in range(_PROVIDER_REPLAY_LIMIT + 1):
         remaining = max(0.0, deadline - time.monotonic())
+        replay_lane_items: tuple[tuple[int, CandidateAssetClass], ...] | None = None
         if attempt > 0:
             if not reports or _unresolved_provider_lanes(reports[-1]) <= 0 or remaining <= 0.0:
                 break
+            replay_lane_items = _provider_replay_lane_items(
+                request_path,
+                acquisition=acquisition,
+                decision_epoch=decision_epoch,
+            )
+            replay_targeted_lanes = len(replay_lane_items)
 
         # A zero-budget first call intentionally preserves the acquisition owner's existing
         # downstream-reserve report rather than inventing a different sidecar result.
         cap = min(original_ceiling, remaining)
         acquisition._MAX_FANOUT_SECONDS = cap
+        if replay_lane_items is not None:
+            acquisition._scheduled_lane_items = lambda _epoch: replay_lane_items
         try:
             report = acquisition.run_provider_acquisition_fanout(
                 request_path,
@@ -142,6 +195,7 @@ def _run_epoch_provider_fanout_with_bounded_replay(
             )
         finally:
             acquisition._MAX_FANOUT_SECONDS = original_ceiling
+            acquisition._scheduled_lane_items = original_schedule
         reports.append(dict(report))
 
     if not reports:
@@ -160,6 +214,7 @@ def _run_epoch_provider_fanout_with_bounded_replay(
             "provider_replay_attempted": True,
             "provider_replay_count": len(reports) - 1,
             "provider_replay_bounded": True,
+            "provider_replay_targeted_lanes": replay_targeted_lanes,
             "provider_replay_initial_unresolved": _unresolved_provider_lanes(reports[0]),
             "provider_replay_final_unresolved": _unresolved_provider_lanes(reports[-1]),
             "provider_replay_initial_budget_seconds": round(initial_budget, 3),
