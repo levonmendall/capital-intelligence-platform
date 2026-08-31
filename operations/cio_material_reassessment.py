@@ -144,12 +144,12 @@ class MaterialCIOReassessmentEngine:
         state_path: str | Path,
         timezone_name: str,
         schedule_times: Sequence[str],
-        scan_interval: timedelta = timedelta(minutes=1),
+        scan_interval: timedelta = timedelta(minutes=5),
         event_cooldown: timedelta = timedelta(minutes=30),
         benchmark_move_threshold: float = 0.01,
         instrument_move_threshold: float = 0.03,
         company_move_threshold: float = 0.05,
-        scheduled_guard: timedelta = timedelta(0),
+        scheduled_guard: timedelta = timedelta(minutes=10),
         client_factory: Callable[[], object] = default_alpaca_client,
         direct_client_factory: Callable[[], object] = DirectGlobalMarketClient,
         active_universe_path: str | Path | None = None,
@@ -411,7 +411,7 @@ class MaterialCIOReassessmentEngine:
             return ReassessmentResult(
                 "not_due",
                 timestamp,
-                detail="The one-minute materiality scan is not due.",
+                detail="The materiality scan is not due.",
             )
         if self._guarded(timestamp):
             state["last_scanned_at"] = timestamp.isoformat()
