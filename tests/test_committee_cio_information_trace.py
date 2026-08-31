@@ -157,13 +157,31 @@ def test_active_executor_appends_trace_for_each_cio_decision(tmp_path) -> None:
     )
 
     result = executor.run(as_of=PRODUCTION_AS_OF)
-    traces = journal.events(
+    information_events = journal.events(
         event_type=CIOJournalEventType.COMMITTEE_CIO_INFORMATION_TRACE,
+    )
+    traces = tuple(
+        event
+        for event in information_events
+        if event.schema_version
+        == "committee-cio-information-trace.v2-self-contained"
+    )
+    attributions = tuple(
+        event
+        for event in information_events
+        if event.payload.get("record_kind") == "cycle_intelligence_attribution"
     )
 
     assert len(traces) == len(result.decisions)
+    assert len(attributions) == 1
     assert traces[0].payload["normalized_point_in_time_record"]["fingerprint"]
     assert traces[0].payload["cio_decision"]["self_contained_context"]
+    attribution = attributions[0].payload
+    assert attribution["cycle_identifier"] == result.identifier
+    assert attribution["candidate_count"] == len(result.decisions)
+    assert attribution["authority"]["decision_authority"] is False
+    assert attribution["authority"]["execution_authority"] is False
+    assert attribution["authority"]["paper_only"] is True
     assert journal.verify_integrity()
 
 
