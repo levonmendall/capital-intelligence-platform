@@ -404,6 +404,10 @@ class ProductionCanonicalCIOExecutor(_BaseProductionCanonicalCIOExecutor):
                     append_committee_cio_information_trace,
                     build_committee_cio_information_trace,
                 )
+                from evaluation.intelligence_attribution import (
+                    append_cycle_intelligence_attribution,
+                    build_cycle_intelligence_attribution,
+                )
 
                 context_by_candidate = {
                     item.candidate_identifier: item
@@ -416,6 +420,7 @@ class ProductionCanonicalCIOExecutor(_BaseProductionCanonicalCIOExecutor):
                     item.candidate_identifier: item
                     for item in result.evaluation_snapshots
                 }
+                traces = []
                 for decision in result.decisions:
                     packet_event = journal.latest(
                         aggregate_identifier=decision.candidate_identifier,
@@ -443,6 +448,13 @@ class ProductionCanonicalCIOExecutor(_BaseProductionCanonicalCIOExecutor):
                         code_version=context.code_version,
                     )
                     append_committee_cio_information_trace(journal, trace)
+                    traces.append(trace)
+                attribution = build_cycle_intelligence_attribution(
+                    cycle_identifier=context.identifier,
+                    as_of=decision_time,
+                    traces=tuple(traces),
+                )
+                append_cycle_intelligence_attribution(journal, attribution)
             except Exception:
                 _LOGGER.exception(
                     "committee/CIO information trace failed after canonical CIO "
