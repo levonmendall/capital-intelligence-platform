@@ -1,17 +1,17 @@
-"""Keep release-evidence qualifier diagnostics out of the long-lived service heap.
+"""Bound release-qualifier stderr without replacing Render's subprocess module.
 
-The release prequalification coordinator is intentionally long lived while every heavy
-qualifier runs in a disposable child.  Capturing a child's complete stderr with
-``subprocess.PIPE`` defeats part of that isolation: a verbose failed attempt can allocate a
-large Python string in the serving process, and CPython's allocator may retain those arenas
-across later retries.  Production then sees anonymous cgroup memory owned by the service
-rather than by the currently supervised qualifier child.
+The release prequalification parent watchdog already owns the one-shot evidence subprocess
+and already routes its stderr through a disk-backed temporary file. The post-#881 repair
+originally installed a second ``memory_safe.subprocess`` proxy before that watchdog. That
+violated the watchdog's explicit bootstrap contract requiring the canonical ``subprocess``
+module and caused Render startup to fail before the service could open its health-check
+port.
 
-This installer changes only stderr transport for the one bounded evidence command.  The
-child still has the same resource/freshness limits and return code.  A bounded tail is read
-from an unlinked disk-backed temporary file so the existing credential-safe failure parser
-can retain its structured terminal record without retaining the complete child log in RAM.
-No evidence, market, CIO, construction, execution, or real-money rule is changed.
+This module now patches only the watchdog's internal watched-run implementation. It keeps
+stderr disk-backed, returns at most a small tail to the long-lived serving process, and
+leaves ``memory_safe.subprocess`` untouched so the existing watchdog and timeout proxies can
+compose in their established order. No evidence, market, CIO, construction, execution, or
+real-money rule is changed.
 """
 
 from __future__ import annotations
@@ -19,39 +19,31 @@ from __future__ import annotations
 import ctypes
 import gc
 import os
-import subprocess as _subprocess
 import tempfile
-from pathlib import Path
-from typing import Any, Mapping, Sequence
+import time
+from datetime import datetime, timezone
+from typing import Any, Mapping
 
 
 _TAIL_BYTES = 256 * 1024
-_QUALIFIER_SCRIPT = "run_bounded_continuous_evidence_plane.py"
 _INSTALLED_ATTR = "_release_qualifier_stderr_isolation_installed"
 
 
-def _command(args: object) -> tuple[str, ...]:
-    if isinstance(args, (str, bytes, bytearray)):
-        return (str(args),)
-    if isinstance(args, Sequence):
-        return tuple(str(item) for item in args)
-    return ()
+def _bounded_tail(handle, *, text_mode: bool) -> str | bytes:
+    """Read only the final bounded stderr segment from an already disk-backed stream."""
 
-
-def _is_release_qualifier(args: object) -> bool:
-    command = _command(args)
-    return len(command) >= 2 and Path(command[1]).name == _QUALIFIER_SCRIPT and "--once" in command
-
-
-def _bounded_tail(handle) -> str:
     handle.flush()
     handle.seek(0, os.SEEK_END)
     size = int(handle.tell())
     handle.seek(max(0, size - _TAIL_BYTES), os.SEEK_SET)
     payload = handle.read(_TAIL_BYTES)
+    if text_mode:
+        if isinstance(payload, bytes):
+            return payload.decode("utf-8", errors="replace")
+        return str(payload)
     if isinstance(payload, bytes):
-        return payload.decode("utf-8", errors="replace")
-    return str(payload)
+        return payload
+    return str(payload).encode("utf-8", errors="replace")
 
 
 def _release_retry_heap() -> None:
@@ -72,54 +64,120 @@ def _release_retry_heap() -> None:
         pass
 
 
-class _SubprocessProxy:
-    """Module-local subprocess proxy overriding only the release qualifier's stderr path."""
+def _bounded_parent_watched_run(command: object, *, original_run, **kwargs):
+    """Mirror the canonical parent watchdog while retaining only a bounded stderr tail."""
 
-    def __init__(self, delegate: Any) -> None:
-        self._delegate = delegate
-        setattr(self, _INSTALLED_ATTR, True)
+    from operations import release_prequalification_parent_watchdog as parent
 
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._delegate, name)
+    env = dict(kwargs.get("env") or os.environ)
+    status = parent.load_release_evidence_prequalification(env)
+    if not isinstance(status, Mapping) or parent._aware(status.get("started_at")) is None:
+        return original_run(command, **kwargs)
 
-    def run(self, *args: Any, **kwargs: Any):
-        command = args[0] if args else kwargs.get("args")
-        if kwargs.get("stderr") is not self._delegate.PIPE or not _is_release_qualifier(command):
-            return self._delegate.run(*args, **kwargs)
+    attempt_started_at = datetime.now(timezone.utc)
+    poll_seconds = parent._positive_seconds(
+        env,
+        (parent._POLL_ENV,),
+        parent._DEFAULT_POLL_SECONDS,
+    )
+    popen_kwargs = dict(kwargs)
+    popen_kwargs.pop("check", None)
+    requested_stderr = popen_kwargs.pop("stderr", None)
+    if popen_kwargs.pop("capture_output", False):
+        popen_kwargs.pop("stdout", None)
+    text_mode = bool(
+        popen_kwargs.get("text") or popen_kwargs.get("universal_newlines")
+    )
+    temporary_root = str(env.get("TMPDIR") or os.environ.get("TMPDIR") or "").strip() or None
 
-        temporary_root = str(os.environ.get("TMPDIR") or "").strip() or None
-        with tempfile.TemporaryFile(mode="w+b", dir=temporary_root) as stderr_file:
-            bounded_kwargs = dict(kwargs)
-            bounded_kwargs["stderr"] = stderr_file
-            completed = self._delegate.run(*args, **bounded_kwargs)
-            stderr_tail = _bounded_tail(stderr_file)
-
-        # Drop any unreferenced allocator arenas before the parent starts another bounded
-        # attempt.  This cannot make an unsafe child pass a memory guard; it only returns
-        # memory that the long-lived parent no longer owns logically.
-        _release_retry_heap()
-        return self._delegate.CompletedProcess(
-            completed.args,
-            completed.returncode,
-            completed.stdout,
-            stderr_tail,
+    with tempfile.TemporaryFile(mode="w+b", dir=temporary_root) as error_stream:
+        process = parent._subprocess.Popen(
+            command,
+            stderr=error_stream,
+            start_new_session=(os.name == "posix"),
+            **popen_kwargs,
         )
+        last_marker: tuple[str, str, str, str] | None = None
+        last_progress_at = time.monotonic()
+        last_progress = None
+
+        while process.poll() is None:
+            progress = parent.observe_current_prequalification_progress(
+                env,
+                started_at=attempt_started_at,
+            )
+            if progress.marker != last_marker:
+                last_marker = progress.marker
+                last_progress_at = time.monotonic()
+                last_progress = progress
+                parent._publish_parent_progress(env, progress=progress)
+            stalled_for = time.monotonic() - last_progress_at
+            if stalled_for >= progress.stall_limit_seconds:
+                parent._stop_process_group(process)
+                failure_line = parent._stall_failure_line(
+                    progress,
+                    stall_seconds=stalled_for,
+                )
+                error_stream.write(("\n" + failure_line + "\n").encode("utf-8"))
+                captured = _bounded_tail(error_stream, text_mode=text_mode)
+                _release_retry_heap()
+                return parent._subprocess.CompletedProcess(
+                    command,
+                    124,
+                    stdout=None,
+                    stderr=(
+                        captured
+                        if requested_stderr == parent._subprocess.PIPE
+                        else None
+                    ),
+                )
+            time.sleep(
+                min(
+                    poll_seconds,
+                    max(0.05, progress.stall_limit_seconds / 4.0),
+                )
+            )
+
+        if last_progress is not None:
+            parent._publish_parent_progress(env, progress=last_progress)
+        captured = _bounded_tail(error_stream, text_mode=text_mode)
+        completed = parent._subprocess.CompletedProcess(
+            command,
+            int(process.returncode or 0),
+            stdout=None,
+            stderr=(captured if requested_stderr == parent._subprocess.PIPE else None),
+        )
+        _release_retry_heap()
+        if kwargs.get("check") and completed.returncode:
+            raise parent._subprocess.CalledProcessError(
+                completed.returncode,
+                command,
+                output=completed.stdout,
+                stderr=completed.stderr,
+            )
+        return completed
 
 
 def install(memory_safe: Any) -> None:
-    """Install disk-backed stderr capture on the memory-safe Render bootstrap only."""
+    """Patch the existing watchdog owner without mutating ``memory_safe.subprocess``."""
 
-    current = getattr(memory_safe, "subprocess", None)
-    if current is None or getattr(current, _INSTALLED_ATTR, False):
+    # ``memory_safe`` is intentionally inspected but never rewritten. The subsequent
+    # parent-watchdog installer must still observe the canonical subprocess module.
+    if getattr(memory_safe, "subprocess", None) is None:
         return
-    memory_safe.subprocess = _SubprocessProxy(current)
+
+    from operations import release_prequalification_parent_watchdog as parent
+
+    if getattr(parent, _INSTALLED_ATTR, False):
+        return
+    parent._watched_run = _bounded_parent_watched_run
+    setattr(parent, _INSTALLED_ATTR, True)
 
 
 __all__ = [
     "_TAIL_BYTES",
-    "_SubprocessProxy",
+    "_bounded_parent_watched_run",
     "_bounded_tail",
-    "_is_release_qualifier",
     "_release_retry_heap",
     "install",
 ]
