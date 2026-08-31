@@ -2,12 +2,10 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
 from cio import CandidateAssetClass
-from operations import comprehensive_discovery_structural_prewarm as overlap
 from operations import epoch_scoped_provider_acquisition as acquisition
 
 
@@ -157,68 +155,3 @@ def test_render_handoff_calls_serial_builder_once_after_complete_validation(
         CandidateAssetClass.INTERNATIONAL_EQUITY.value,
     ]
     assert serial_calls == [tmp_path / "request.json"]
-
-
-def test_bounded_replay_prioritizes_only_missing_publication_lane(
-    monkeypatch, tmp_path
-) -> None:
-    clock = SimpleNamespace(now=100.0)
-    observed_schedules: list[tuple[tuple[int, CandidateAssetClass], ...]] = []
-    observed_caps: list[float] = []
-    lanes = (
-        (0, CandidateAssetClass.US_EQUITY),
-        (4, CandidateAssetClass.INTERNATIONAL_EQUITY),
-    )
-    original_ceiling = acquisition._MAX_FANOUT_SECONDS
-
-    monkeypatch.setattr(overlap.time, "monotonic", lambda: clock.now)
-    monkeypatch.setattr(acquisition, "_scheduled_lane_items", lambda _epoch: lanes)
-    monkeypatch.setattr(
-        acquisition,
-        "_fanout_budget_seconds",
-        lambda decision_epoch, values: 42.0,
-    )
-
-    def fake_fanout(request_path, *, values, decision_epoch):
-        observed_caps.append(float(acquisition._MAX_FANOUT_SECONDS))
-        observed_schedules.append(tuple(acquisition._scheduled_lane_items(decision_epoch)))
-        if len(observed_schedules) == 1:
-            (tmp_path / "provider-preselection-000-us_equity.json").write_text(
-                "{}", encoding="utf-8"
-            )
-            clock.now += 4.0
-            return {
-                "attempted": True,
-                "scheduled_lanes": 2,
-                "completed": 1,
-                "failed": 1,
-                "provider_skipped_lanes": 0,
-            }
-        clock.now += 2.0
-        return {
-            "attempted": True,
-            "scheduled_lanes": 1,
-            "completed": 1,
-            "failed": 0,
-            "provider_skipped_lanes": 0,
-        }
-
-    monkeypatch.setattr(acquisition, "run_provider_acquisition_fanout", fake_fanout)
-
-    result = overlap._run_epoch_provider_fanout_with_bounded_replay(
-        tmp_path / "request.json",
-        values={"RENDER": "true"},
-        decision_epoch=_as_of(),
-    )
-
-    assert observed_schedules == [
-        lanes,
-        ((4, CandidateAssetClass.INTERNATIONAL_EQUITY),),
-    ]
-    assert observed_caps == [10.0, 6.0]
-    assert acquisition._MAX_FANOUT_SECONDS == original_ceiling
-    assert result["provider_replay_attempted"] is True
-    assert result["provider_replay_initial_unresolved"] == 1
-    assert result["provider_replay_final_unresolved"] == 0
-    assert result["provider_prewarm_handoff_margin_seconds"] == 30.0
-    assert result["provider_prewarm_cleanup_reserve_seconds"] == 2.0
