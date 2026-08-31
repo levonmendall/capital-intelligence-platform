@@ -1,15 +1,16 @@
 """Reactive-plan-aware CIO reassessment with reassessment-only authority.
 
 This layer composes the existing price/content materiality scanner with the latest
-hash-chain-verified active-investor ReactiveMonitoringPlan.  A dependency match may
-request a canonical CIO reassessment.  It cannot change a CIO action, construction,
-portfolio state, execution instruction, policy, or real-money authorization.
+hash-chain-verified active-investor ReactiveMonitoringPlan. A dependency match may
+request a canonical CIO reassessment. Distinct dependency matches are independently
+idempotent, so an unrelated recent review cannot delay them.
+
+It cannot change a CIO action, construction, portfolio state, execution instruction,
+policy, or real-money authorization.
 """
 
 from __future__ import annotations
 
-import hashlib
-import json
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Mapping
@@ -18,7 +19,6 @@ from operations.cio_material_reassessment import (
     ReassessmentResult,
     aware_utc,
     load_json,
-    parse_datetime,
     save_json,
 )
 from operations.investor_material_reassessment import (
@@ -76,9 +76,6 @@ class ReactiveInvestorMaterialCIOReassessmentEngine(
                 self.active_investor_database
             )
         except (OSError, ValueError):
-            # A corrupt/unauthorized monitoring plan is fail-closed: it is ignored
-            # and cannot create a reassessment request. The existing independent
-            # price/content materiality scanner remains active.
             return (), (), ()
         if plan is None:
             return (), (), ()
@@ -161,7 +158,22 @@ class ReactiveInvestorMaterialCIOReassessmentEngine(
             )
         )[-_ACKNOWLEDGED_LIMIT:]
 
+        opportunity_keys = tuple(
+            dict.fromkeys(
+                (
+                    *(f"reactive-record:{item}" for item in record_ids),
+                    *(f"reactive-dependency:{item}" for item in dependency_ids),
+                )
+            )
+        )
+
         if base.triggered and base.trigger_key is not None:
+            self._attach_opportunities_to_trigger(
+                state,
+                trigger_key=base.trigger_key,
+                opportunity_keys=opportunity_keys,
+                timestamp=timestamp,
+            )
             state["last_trigger_reactive_dependency_identifiers"] = list(
                 dependency_ids
             )
@@ -174,25 +186,18 @@ class ReactiveInvestorMaterialCIOReassessmentEngine(
                 reasons=combined_reasons,
                 symbol_count=base.symbol_count,
                 detail=(
-                    "Material market/public evidence and one or more declared "
-                    "reactive monitoring dependencies request a canonical CIO "
-                    "reassessment."
+                    "Material market/public evidence and distinct declared reactive "
+                    "monitoring dependencies request a canonical CIO reassessment."
                 ),
             )
 
-        fingerprint = hashlib.sha256(
-            json.dumps(
-                {
-                    "revision": int(state.get("baseline_revision", 0) or 0),
-                    "reactive_record_identifiers": record_ids,
-                    "reactive_dependency_identifiers": dependency_ids,
-                    "reasons": combined_reasons,
-                },
-                sort_keys=True,
-                separators=(",", ":"),
-            ).encode("utf-8")
-        ).hexdigest()
-        if state.get("last_trigger_fingerprint") == fingerprint:
+        trigger_key, claimed = self._claim_distinct_opportunities(
+            state,
+            opportunity_keys=opportunity_keys,
+            timestamp=timestamp,
+            prefix="reactive-evidence",
+        )
+        if trigger_key is None:
             save_json(self.state_path, state)
             return ReassessmentResult(
                 state="deduplicated",
@@ -200,44 +205,20 @@ class ReactiveInvestorMaterialCIOReassessmentEngine(
                 reasons=combined_reasons,
                 symbol_count=base.symbol_count,
                 detail=(
-                    "The same reactive monitoring condition already requested a "
-                    "canonical CIO reassessment."
+                    "The same reactive records and dependencies already requested a "
+                    "canonical CIO reassessment; different dependencies are not delayed."
                 ),
             )
 
-        last_triggered = parse_datetime(state.get("last_triggered_at"))
-        if (
-            last_triggered is not None
-            and timestamp - last_triggered < self.event_cooldown
-        ):
-            save_json(self.state_path, state)
-            return ReassessmentResult(
-                state="cooldown",
-                evaluated_at=timestamp,
-                reasons=combined_reasons,
-                symbol_count=base.symbol_count,
-                detail=(
-                    "Reactive dependency evidence is retained for reassessment "
-                    "after the current event-review cooldown."
-                ),
-            )
-
-        local = timestamp.astimezone(self.timezone)
-        trigger_key = (
-            f"reactive-evidence-{local.strftime('%Y%m%d-%H%M')}-"
-            f"{fingerprint[:12]}"
-        )
-        state.update(
-            {
-                "last_triggered_at": timestamp.isoformat(),
-                "last_trigger_fingerprint": fingerprint,
-                "last_trigger_key": trigger_key,
-                "last_trigger_public_record_identifiers": list(record_ids),
-                "last_trigger_reactive_dependency_identifiers": list(
-                    dependency_ids
-                ),
-            }
-        )
+        claimed_set = set(claimed)
+        state["last_trigger_public_record_identifiers"] = [
+            item for item in record_ids if f"reactive-record:{item}" in claimed_set
+        ]
+        state["last_trigger_reactive_dependency_identifiers"] = [
+            item
+            for item in dependency_ids
+            if f"reactive-dependency:{item}" in claimed_set
+        ]
         save_json(self.state_path, state)
         return ReassessmentResult(
             state="triggered",
@@ -247,10 +228,10 @@ class ReactiveInvestorMaterialCIOReassessmentEngine(
             reasons=combined_reasons,
             symbol_count=base.symbol_count,
             detail=(
-                "Qualified point-in-time evidence matched one or more dependencies "
+                "Qualified point-in-time evidence matched a distinct dependency "
                 "declared by the latest active-investor reactive monitoring plan and "
-                "requests a canonical CIO reassessment. The monitoring layer has no "
-                "portfolio or execution authority."
+                "requests an immediate canonical CIO reassessment. The monitoring "
+                "layer has no portfolio or execution authority."
             ),
         )
 
