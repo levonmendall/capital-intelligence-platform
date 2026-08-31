@@ -520,7 +520,9 @@ def build_spool(
             merged_shards.append(
                 {
                     "asset_class": asset_class.value,
-                    "blob": dict(_legacy._descriptor(state.get("blob")).__dict__),
+                    "blob": _legacy._descriptor_dict(
+                        _legacy._descriptor(state.get("blob"))
+                    ),
                     "record_count": int(state.get("record_count", 0)),
                 }
             )
