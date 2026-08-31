@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import tempfile
 from datetime import datetime, timezone
@@ -9,6 +8,7 @@ from types import SimpleNamespace
 
 from operations import release_prequalification_parent_watchdog as parent
 from operations import release_prequalification_stderr_isolation as isolation
+from operations import release_prequalification_timeout_contract as timeout_contract
 
 
 def _safe_failure() -> str:
@@ -61,6 +61,25 @@ def test_post_882_isolation_preserves_parent_watchdog_bootstrap_contract(monkeyp
     parent.install_release_prequalification_parent_watchdog(memory_safe)
 
     assert isinstance(memory_safe.subprocess, parent._SubprocessProxy)
+
+
+def test_full_render_watchdog_install_chain_remains_composable(monkeypatch) -> None:
+    original_watched_run = parent._watched_run
+    monkeypatch.delattr(parent, isolation._INSTALLED_ATTR, raising=False)
+    monkeypatch.setattr(parent, "_watched_run", original_watched_run)
+    monkeypatch.setattr(timeout_contract, "_install_parent_progress_adapters", lambda: None)
+    memory_safe = SimpleNamespace(subprocess=subprocess)
+
+    isolation.install(memory_safe)
+    parent.install_release_prequalification_parent_watchdog(memory_safe)
+    timeout_contract.install_release_prequalification_timeout_contract(memory_safe)
+
+    assert isinstance(
+        memory_safe.subprocess,
+        timeout_contract._ProgressSupervisedSubprocessProxy,
+    )
+    assert isinstance(memory_safe.subprocess._parent_proxy, parent._SubprocessProxy)
+    assert parent._watched_run is isolation._bounded_parent_watched_run
 
 
 def test_isolation_install_is_idempotent_and_module_local(monkeypatch) -> None:
