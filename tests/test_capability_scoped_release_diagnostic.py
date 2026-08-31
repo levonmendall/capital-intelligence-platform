@@ -134,6 +134,44 @@ def test_singleflight_observes_owned_same_release_instead_of_starting_second_chi
     assert published
 
 
+def test_singleflight_prior_release_terminal_hands_lane_to_current_release(monkeypatch):
+    """Regression: a prior release completing while we wait must not strand this release."""
+
+    request = SimpleNamespace(
+        request_id="request-prior",
+        state="in_progress",
+        requested_by="render-release:prior123",
+    )
+    terminal = SimpleNamespace(
+        request_id="request-prior",
+        state="completed",
+        requested_by="render-release:prior123",
+    )
+    sequence = iter((request, terminal))
+    latest = {"value": terminal}
+
+    def read_latest(**_kwargs):
+        try:
+            latest["value"] = next(sequence)
+        except StopIteration:
+            pass
+        return latest["value"]
+
+    monkeypatch.setattr(runtime, "latest_manual_cio_diagnostic", read_latest)
+    monkeypatch.setattr(runtime, "_active_owner_exists", lambda *_args, **_kwargs: True)
+
+    result = runtime._coalesce_running_diagnostic(
+        {
+            "RENDER": "true",
+            "CAPITAL_INTELLIGENCE_RELEASE": "current456",
+        },
+        publish_audit=lambda _values: None,
+        refresh_seconds=0.1,
+    )
+
+    assert result is None
+
+
 def test_singleflight_falls_back_to_normal_recovery_when_owner_is_gone(monkeypatch):
     request = SimpleNamespace(
         request_id="request-stale",
@@ -176,6 +214,7 @@ def test_installed_singleflight_does_not_invoke_original_runner_when_coalesced(
 ):
     calls = {"original": 0}
     logs: list[tuple[str, dict[str, object]]] = []
+    published: list[tuple[object, object]] = []
     current = SimpleNamespace(
         request_id="request-1",
         state="in_progress",
@@ -199,6 +238,11 @@ def test_installed_singleflight_does_not_invoke_original_runner_when_coalesced(
         "latest_manual_cio_diagnostic",
         lambda **_kwargs: current,
     )
+    monkeypatch.setattr(
+        runtime,
+        "publish_release_production_state",
+        lambda release, request, **_kwargs: published.append((release, request)),
+    )
 
     runtime.install(memory_safe)
     result = bootstrap._run_release_diagnostic_with_live_audit(
@@ -211,6 +255,43 @@ def test_installed_singleflight_does_not_invoke_original_runner_when_coalesced(
 
     assert result == 0
     assert calls["original"] == 0
+    assert published == [("abc123", current)]
     assert logs[-1][0] == "manual_cio_release_diagnostic_singleflight_observed"
     assert logs[-1][1]["competing_child_started"] is False
     assert logs[-1][1]["complete_all_market_coverage_required"] is True
+
+
+def test_installed_runner_publishes_exact_release_state_after_child(monkeypatch):
+    calls: list[str] = []
+    terminal = SimpleNamespace(
+        request_id="request-current",
+        state="completed",
+        requested_by="render-release:abc123",
+    )
+
+    bootstrap = SimpleNamespace()
+    bootstrap._release_diagnostic_environment = lambda values: dict(values)
+    bootstrap._run_release_diagnostic_with_live_audit = lambda *_args, **_kwargs: 0
+    bootstrap._publish_release_diagnostic_audit = lambda _values: 0
+    bootstrap._log = lambda *_args, **_kwargs: None
+    memory_safe = SimpleNamespace(render_bootstrap=bootstrap)
+
+    monkeypatch.setattr(runtime, "_coalesce_running_diagnostic", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(runtime, "latest_manual_cio_diagnostic", lambda **_kwargs: terminal)
+    monkeypatch.setattr(
+        runtime,
+        "publish_release_production_state",
+        lambda release, request, **_kwargs: calls.append(f"{release}:{request.request_id}"),
+    )
+
+    runtime.install(memory_safe)
+    result = bootstrap._run_release_diagnostic_with_live_audit(
+        ("python", "run_bounded_manual_cio_diagnostic.py"),
+        diagnostic_values={
+            "RENDER": "true",
+            "CAPITAL_INTELLIGENCE_RELEASE": "abc123",
+        },
+    )
+
+    assert result == 0
+    assert calls == ["abc123:request-current"]
