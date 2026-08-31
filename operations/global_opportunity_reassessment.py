@@ -105,16 +105,17 @@ class GlobalOpportunityMaterialCIOReassessmentEngine(
         self,
         *,
         state: Mapping[str, Any],
-    ) -> tuple[
-        str | None,
-        tuple[str, ...],
-        tuple[str, ...],
-        Mapping[str, float],
-    ]:
+    ) -> tuple[str | None, tuple[str, ...], Mapping[str, float]]:
+        """Return the historical three-value leadership contract.
+
+        Opportunity identities are intentionally derived separately so existing
+        diagnostics/tests that consume this private analytical helper remain stable.
+        """
+
         current = state.get("last_prices")
         baseline = state.get("assessment_prices")
         if not isinstance(current, Mapping) or not isinstance(baseline, Mapping):
-            return None, (), (), {}
+            return None, (), {}
         domains = self._symbol_domains()
         moves: dict[str, list[float]] = {}
         for symbol, raw_current in current.items():
@@ -133,21 +134,21 @@ class GlobalOpportunityMaterialCIOReassessmentEngine(
             move = float(raw_current) / float(raw_baseline) - 1.0
             moves.setdefault(domains[symbol], []).append(move)
         if len(moves) < 2:
-            return None, (), (), {}
+            return None, (), {}
         domain_scores = {
             domain: sum(values) / len(values)
             for domain, values in moves.items()
             if values
         }
         if len(domain_scores) < 2:
-            return None, (), (), {}
+            return None, (), {}
         ordered = sorted(
             domain_scores.items(),
             key=lambda item: (item[1], item[0]),
             reverse=True,
         )
         leader, leader_score = ordered[0]
-        runner_up, runner_up_score = ordered[1]
+        runner_up_score = ordered[1][1]
         spread = leader_score - runner_up_score
         prior_leader = str(state.get("global_opportunity_leader_domain", "")).strip()
         prior_score = state.get("global_opportunity_leader_score")
@@ -157,13 +158,11 @@ class GlobalOpportunityMaterialCIOReassessmentEngine(
             else None
         )
         reasons: list[str] = []
-        opportunity_keys: list[str] = []
         if spread >= self.leadership_spread_threshold and leader_score > 0.0:
             reasons.append(
                 f"global opportunity leadership spread favors {leader}: "
                 f"{leader_score:+.2%} versus {runner_up_score:+.2%} for the runner-up domain"
             )
-            opportunity_keys.append(f"global-leadership-spread:{leader}:{runner_up}")
         if (
             prior_leader
             and prior_leader != leader
@@ -171,9 +170,6 @@ class GlobalOpportunityMaterialCIOReassessmentEngine(
         ):
             reasons.append(
                 f"global opportunity leadership rotated from {prior_leader} to {leader}"
-            )
-            opportunity_keys.append(
-                f"global-leadership-rotation:{prior_leader}:{leader}"
             )
         if (
             prior_leader == leader
@@ -185,13 +181,48 @@ class GlobalOpportunityMaterialCIOReassessmentEngine(
                 f"{leader_score - prior_score_value:+.2%} since the last "
                 "acknowledged CIO assessment"
             )
-            opportunity_keys.append(f"global-leadership-strengthened:{leader}")
-        return (
-            leader,
-            tuple(dict.fromkeys(reasons)),
-            tuple(dict.fromkeys(opportunity_keys)),
-            domain_scores,
+        return leader, tuple(dict.fromkeys(reasons)), domain_scores
+
+    def _leadership_opportunity_keys(
+        self,
+        *,
+        state: Mapping[str, Any],
+        leader: str,
+        domain_scores: Mapping[str, float],
+    ) -> tuple[str, ...]:
+        ordered = sorted(
+            domain_scores.items(),
+            key=lambda item: (item[1], item[0]),
+            reverse=True,
         )
+        if len(ordered) < 2:
+            return ()
+        leader_score = float(domain_scores[leader])
+        runner_up, runner_up_score = ordered[1]
+        spread = leader_score - runner_up_score
+        prior_leader = str(state.get("global_opportunity_leader_domain", "")).strip()
+        prior_score = state.get("global_opportunity_leader_score")
+        prior_score_value = (
+            float(prior_score)
+            if isinstance(prior_score, (int, float)) and not isinstance(prior_score, bool)
+            else None
+        )
+        keys: list[str] = []
+        if spread >= self.leadership_spread_threshold and leader_score > 0.0:
+            keys.append(f"global-leadership-spread:{leader}:{runner_up}")
+        if (
+            prior_leader
+            and prior_leader != leader
+            and leader_score >= self.leadership_change_threshold
+        ):
+            keys.append(f"global-leadership-rotation:{prior_leader}:{leader}")
+        if (
+            prior_leader == leader
+            and prior_score_value is not None
+            and leader_score - prior_score_value >= self.leadership_change_threshold
+        ):
+            keys.append(f"global-leadership-strengthened:{leader}")
+        return tuple(dict.fromkeys(keys))
 
     def scan_if_due(
         self,
@@ -209,11 +240,14 @@ class GlobalOpportunityMaterialCIOReassessmentEngine(
         }:
             return base
         state = load_json(self.state_path)
-        leader, reasons, opportunity_keys, domain_scores = self._leadership_change(
-            state=state
-        )
+        leader, reasons, domain_scores = self._leadership_change(state=state)
         if leader is None:
             return base
+        opportunity_keys = self._leadership_opportunity_keys(
+            state=state,
+            leader=leader,
+            domain_scores=domain_scores,
+        )
         state["latest_global_opportunity_leader_domain"] = leader
         state["latest_global_opportunity_domain_scores"] = {
             key: round(value, 8) for key, value in sorted(domain_scores.items())
