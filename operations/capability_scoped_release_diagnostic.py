@@ -27,6 +27,7 @@ from operations.capability_operating_evidence import (
 )
 from operations.manual_cio_diagnostic import latest_manual_cio_diagnostic
 from operations.reference_readiness import ReferenceReadinessManifest
+from operations.release_production_state import publish_release_production_state
 
 _INSTALLED_ATTR = "_capability_scoped_release_diagnostic_installed"
 _OWNER_LEASE_FILENAME = "manual-cio-diagnostic-owner.json"
@@ -158,13 +159,31 @@ def _diagnostic_timeout_seconds(values: Mapping[str, str]) -> float:
     return value if value > 0 else _DEFAULT_DIAGNOSTIC_TIMEOUT_SECONDS
 
 
+def _publish_exact_release_state(values: MutableMapping[str, str]) -> None:
+    """Snapshot only the diagnostic owned by this exact Render release."""
+
+    release = _release(values)
+    if release == "unknown":
+        return
+    current = latest_manual_cio_diagnostic(values=values)
+    if current is None or current.requested_by != f"render-release:{release}":
+        return
+    publish_release_production_state(release, current, values=values)
+
+
 def _coalesce_running_diagnostic(
     values: MutableMapping[str, str],
     *,
     publish_audit: Callable[[MutableMapping[str, str]], object],
     refresh_seconds: float,
 ) -> int | None:
-    """Observe an already-owned diagnostic instead of launching a competing child."""
+    """Observe an already-owned diagnostic without losing the current release turn.
+
+    A diagnostic owned by another release may still be running when a new deployment starts.
+    The new release waits for that owner, but once the prior owner becomes terminal the new
+    release must continue and create its own exact-release request. Returning BUSY at that
+    handoff used to strand the new release with no certification-v2 input or production state.
+    """
 
     existing = latest_manual_cio_diagnostic(values=values)
     if (
@@ -185,10 +204,12 @@ def _coalesce_running_diagnostic(
             return None
         if current.request_id != existing.request_id:
             return None
-        if current.state == "completed":
-            return 0 if current.requested_by == expected_requester else _BUSY_RETURN_CODE
-        if current.state == "failed":
-            return _BUSY_RETURN_CODE
+        if current.state in {"completed", "failed"}:
+            if current.requested_by == expected_requester:
+                return 0 if current.state == "completed" else _BUSY_RETURN_CODE
+            # A prior release has relinquished the single-flight lane. The current release
+            # now owns the next turn and must proceed rather than exiting BUSY forever.
+            return None
         if current.state != "in_progress":
             return None
         if not _active_owner_exists(current.request_id, values):
@@ -245,6 +266,10 @@ def install(memory_safe) -> None:
             )
             if coalesced is not None:
                 current = latest_manual_cio_diagnostic(values=diagnostic_values)
+                if current is not None and current.requested_by == (
+                    f"render-release:{_release(diagnostic_values)}"
+                ):
+                    _publish_exact_release_state(diagnostic_values)
                 render_bootstrap._log(
                     "manual_cio_release_diagnostic_singleflight_observed",
                     release=_release(diagnostic_values),
@@ -258,11 +283,15 @@ def install(memory_safe) -> None:
                     real_money_authorized=False,
                 )
                 return coalesced
-        return original_run_with_audit(
-            command,
-            diagnostic_values=diagnostic_values,
-            refresh_seconds=refresh_seconds,
-        )
+        try:
+            return original_run_with_audit(
+                command,
+                diagnostic_values=diagnostic_values,
+                refresh_seconds=refresh_seconds,
+            )
+        finally:
+            if capability_scoped_operation_enabled(diagnostic_values):
+                _publish_exact_release_state(diagnostic_values)
 
     render_bootstrap._release_diagnostic_environment = release_environment
     render_bootstrap._run_release_diagnostic_with_live_audit = run_with_live_audit
