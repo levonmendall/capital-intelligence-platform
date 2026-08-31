@@ -12,6 +12,7 @@ def _engine(tmp_path):
         schedule_times=("10:00",),
         scan_interval=timedelta(minutes=1),
         event_cooldown=timedelta(minutes=30),
+        scheduled_guard=timedelta(0),
         active_universe_path=tmp_path / "active-universe.json",
     )
 
@@ -133,7 +134,7 @@ def test_failed_trigger_releases_only_its_own_opportunity_claims(tmp_path):
     assert still_deduped_first is None
 
 
-def test_default_scheduled_guard_does_not_suppress_event_review(tmp_path):
+def test_production_event_guard_override_does_not_suppress_review(tmp_path):
     engine = _engine(tmp_path)
     scheduled = datetime(2026, 8, 30, 17, 0, tzinfo=timezone.utc)
 
