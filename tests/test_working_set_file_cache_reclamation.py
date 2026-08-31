@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import run_bounded_manual_cio_diagnostic as bounded_watchdog
+from operations import reclaimable_memory_guard as guard
 from operations.reclaimable_memory_guard import MemoryBoundaries, MemorySnapshot
 from operations.working_set_file_cache_reclamation import (
     should_reclaim_file_backed_working_set,
@@ -67,3 +69,79 @@ def test_below_boundary_never_reclaims_even_with_large_active_file_cache():
         _snapshot(working_set_kib=1_400_000, active_file_kib=500_000),
         boundaries,
     )
+
+
+def test_production_wait_reclaims_file_backed_crossing_before_guard_decision(monkeypatch):
+    before = _snapshot(working_set_kib=1_459_628, active_file_kib=120_000)
+    after = _snapshot(working_set_kib=1_390_000, active_file_kib=50_000)
+    snapshots = iter((before, after))
+    released: list[dict[str, str]] = []
+    observed: list[MemorySnapshot] = []
+
+    monkeypatch.setattr(guard, "memory_snapshot", lambda values=None: next(snapshots))
+
+    def fake_guard_wait(process, **kwargs):
+        del process
+        observed.append(guard.memory_snapshot(kwargs.get("values")))
+        return (0, False, False, 60_684, 1_670_436)
+
+    monkeypatch.setattr(guard, "wait_with_reclaimable_resource_bounds", fake_guard_wait)
+    wait = bounded_watchdog._wait_with_resource_bounds
+    monkeypatch.setitem(
+        wait.__globals__,
+        "release_streaming_clean_file_cache",
+        lambda values: released.append(dict(values))
+        or {
+            "supported": True,
+            "scan_entries": 10,
+            "released_file_count": 2,
+            "released_bytes": 80 * 1024 * 1024,
+        },
+    )
+
+    result = wait(
+        object(),
+        timeout_seconds=30.0,
+        memory_high_water_fraction=0.70,
+        values={"RENDER": "true"},
+        memory_reserve_kib=640 * 1024,
+        poll_seconds=0.1,
+    )
+
+    assert result == (0, False, False, 60_684, 1_670_436)
+    assert released == [{"RENDER": "true"}]
+    assert observed == [after]
+
+
+def test_production_wait_does_not_reclaim_true_non_file_pressure(monkeypatch):
+    before = _snapshot(working_set_kib=1_459_628, active_file_kib=20_000)
+    released: list[dict[str, str]] = []
+    observed: list[MemorySnapshot] = []
+
+    monkeypatch.setattr(guard, "memory_snapshot", lambda values=None: before)
+
+    def fake_guard_wait(process, **kwargs):
+        del process
+        observed.append(guard.memory_snapshot(kwargs.get("values")))
+        return (None, False, True, 60_684, 1_670_436)
+
+    monkeypatch.setattr(guard, "wait_with_reclaimable_resource_bounds", fake_guard_wait)
+    wait = bounded_watchdog._wait_with_resource_bounds
+    monkeypatch.setitem(
+        wait.__globals__,
+        "release_streaming_clean_file_cache",
+        lambda values: released.append(dict(values)) or {"supported": True},
+    )
+
+    result = wait(
+        object(),
+        timeout_seconds=30.0,
+        memory_high_water_fraction=0.70,
+        values={"RENDER": "true"},
+        memory_reserve_kib=640 * 1024,
+        poll_seconds=0.1,
+    )
+
+    assert result == (None, False, True, 60_684, 1_670_436)
+    assert released == []
+    assert observed == [before]
