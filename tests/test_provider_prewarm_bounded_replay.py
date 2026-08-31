@@ -115,6 +115,13 @@ def test_structural_skip_is_treated_as_unresolved_and_replayed(monkeypatch, tmp_
 def test_replay_does_not_extend_exhausted_original_window(monkeypatch, tmp_path) -> None:
     clock = SimpleNamespace(now=200.0)
     calls = 0
+    expected = {
+        "attempted": True,
+        "scheduled_lanes": 5,
+        "completed": 4,
+        "failed": 1,
+        "provider_skipped_lanes": 0,
+    }
 
     monkeypatch.setattr(overlap.time, "monotonic", lambda: clock.now)
     monkeypatch.setattr(
@@ -127,13 +134,7 @@ def test_replay_does_not_extend_exhausted_original_window(monkeypatch, tmp_path)
         nonlocal calls
         calls += 1
         clock.now += 7.0
-        return {
-            "attempted": True,
-            "scheduled_lanes": 5,
-            "completed": 4,
-            "failed": 1,
-            "provider_skipped_lanes": 0,
-        }
+        return dict(expected)
 
     monkeypatch.setattr(acquisition, "run_provider_acquisition_fanout", fake_fanout)
 
@@ -144,9 +145,30 @@ def test_replay_does_not_extend_exhausted_original_window(monkeypatch, tmp_path)
     )
 
     assert calls == 1
-    assert result["provider_replay_attempted"] is False
-    assert result["provider_replay_final_unresolved"] == 1
-    assert result["provider_replay_remaining_budget_seconds"] == 0.0
+    assert result == expected
+
+
+def test_no_replay_preserves_existing_fanout_return_shape(monkeypatch, tmp_path) -> None:
+    expected = {"attempted": True, "completed": 5, "failed": 0}
+
+    monkeypatch.setattr(
+        acquisition,
+        "_fanout_budget_seconds",
+        lambda decision_epoch, values: 0.0,
+    )
+    monkeypatch.setattr(
+        acquisition,
+        "run_provider_acquisition_fanout",
+        lambda *args, **kwargs: dict(expected),
+    )
+
+    result = overlap._run_epoch_provider_fanout_with_bounded_replay(
+        tmp_path / "request.json",
+        values={"RENDER": "true"},
+        decision_epoch=_as_of(),
+    )
+
+    assert result == expected
 
 
 def test_provider_ceiling_is_restored_when_fanout_raises(monkeypatch, tmp_path) -> None:
