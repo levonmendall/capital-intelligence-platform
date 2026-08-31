@@ -43,6 +43,34 @@ def _summary() -> dict[str, object]:
     }
 
 
+def _historical_summary() -> dict[str, object]:
+    summary = _summary()
+    summary["source"] = "Latest completed global evaluation"
+    summary["reached"] = 1
+    summary["rows"] = [
+        summary["rows"][0],
+        {
+            "key": "fx",
+            "asset_class": "FX",
+            "status": "Awaiting evaluation",
+            "detail": "No current-cycle terminal evaluation is recorded for this asset class.",
+        },
+        {
+            "key": "fixed_income",
+            "asset_class": "Fixed income",
+            "status": "Awaiting evaluation",
+            "detail": "No current-cycle terminal evaluation is recorded for this asset class.",
+        },
+        {
+            "key": "commodity",
+            "asset_class": "Commodities",
+            "status": "Awaiting evaluation",
+            "detail": "No current-cycle terminal evaluation is recorded for this asset class.",
+        },
+    ]
+    return summary
+
+
 def test_evidence_accumulation_mirrors_crypto_information_hierarchy() -> None:
     html = evidence_ui.render_evidence_accumulation(_summary())
 
@@ -57,6 +85,26 @@ def test_evidence_accumulation_mirrors_crypto_information_hierarchy() -> None:
     assert "Failed" in html
     assert "3 / 4" in html
     assert "1 / 4" in html
+    assert "Snapshot coverage" not in html
+    assert "Not in latest snapshot" not in html
+
+
+def test_historical_fallback_never_uses_current_cycle_language() -> None:
+    html = evidence_ui.render_evidence_accumulation(_historical_summary())
+
+    assert "Latest completed global evaluation" in html
+    assert "Snapshot coverage" in html
+    assert "represented in completed snapshot" in html
+    assert "Not in snapshot" in html
+    assert "no record in completed snapshot" in html
+    assert "Not in latest snapshot" in html
+    assert "Represented" in html
+    assert "latest completed snapshot" in html
+    assert "No terminal record is present for this asset class in the latest completed snapshot." in html
+    assert "current exact-release activity is tracked separately" in html
+    assert "Reached now" not in html
+    assert "Awaiting evaluation" not in html
+    assert "Await the governed evaluation path; thresholds remain unchanged." not in html
 
 
 def test_each_asset_class_gets_a_full_breakdown_card() -> None:
