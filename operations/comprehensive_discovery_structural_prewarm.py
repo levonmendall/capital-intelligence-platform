@@ -152,11 +152,7 @@ def _run_epoch_provider_fanout_with_bounded_replay(
             "failed": 0,
         }
     if len(reports) == 1:
-        result = dict(reports[0])
-        result.setdefault("provider_prewarm_governed_budget_seconds", round(governed_budget, 3))
-        result.setdefault("provider_prewarm_handoff_margin_seconds", _OPERATIONAL_HANDOFF_MARGIN_SECONDS)
-        result.setdefault("provider_prewarm_cleanup_reserve_seconds", _COMPLETION_CLEANUP_RESERVE_SECONDS)
-        return result
+        return dict(reports[0])
 
     final = dict(reports[-1])
     final.update(
