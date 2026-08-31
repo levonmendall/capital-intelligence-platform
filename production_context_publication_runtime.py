@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -42,6 +43,9 @@ from operations.free_paper_pilot import (
 from operations.production_capability_authority import (
     reconcile_production_capability_authority,
 )
+from operations.shadow_opportunity_ledger import (
+    record_capability_blocked_opportunities,
+)
 from production_context_screening_resource_guard import (
     ensure_screening_headroom,
     trim_released_heap,
@@ -52,6 +56,7 @@ from providers.fred import FREDProvider
 STATE_SCHEMA = "production-context-publication-state.v1"
 STATE_FILENAME = "production-context-publication-state.json"
 CAPABILITY_REPORT_FILENAME = "production-capability-authority.json"
+SHADOW_OPPORTUNITY_DATABASE_FILENAME = "shadow-opportunity-ledger.db"
 
 ReadinessProbe = Callable[[FreePaperPilotUniverse], object]
 CashProbe = Callable[[], object]
@@ -218,6 +223,46 @@ def _advance_screening_if_ready(result: ProductionContextPublicationResult) -> N
     )
 
 
+def _shadow_learning_payload(
+    *,
+    settings: ApiSettings,
+    report: object,
+    publication_identifier: str,
+    screening_cycle_identifier: str,
+    evaluated_at: datetime,
+) -> dict[str, object]:
+    """Persist non-authoritative observations without blocking canonical operation."""
+
+    database_path = (
+        settings.portfolio_database.parent / SHADOW_OPPORTUNITY_DATABASE_FILENAME
+    )
+    transitions = tuple(getattr(report, "transitions", ()) or ())
+    try:
+        recorded = record_capability_blocked_opportunities(
+            database_path=database_path,
+            publication_identifier=publication_identifier,
+            screening_cycle_identifier=screening_cycle_identifier,
+            observed_at=evaluated_at,
+            transitions=transitions,
+        )
+    except (OSError, sqlite3.Error, TypeError, ValueError) as error:
+        return {
+            "state": "degraded",
+            "detail": f"shadow opportunity learning failed: {type(error).__name__}",
+            "database_path": str(database_path),
+            "recorded_count": 0,
+            "canonical_execution_authority": False,
+            "real_money_authorized": False,
+        }
+    return {
+        "state": "recorded",
+        "database_path": str(database_path),
+        "recorded_count": len(recorded),
+        "canonical_execution_authority": False,
+        "real_money_authorized": False,
+    }
+
+
 def _reconcile_capability_authority_if_ready(
     *,
     settings: ApiSettings,
@@ -252,6 +297,13 @@ def _reconcile_capability_authority_if_ready(
         else "comprehensive_discovery"
     )
     payload["all_market_certification_is_operating_gate"] = False
+    payload["shadow_opportunity_learning"] = _shadow_learning_payload(
+        settings=settings,
+        report=report,
+        publication_identifier=eligible_identifier,
+        screening_cycle_identifier=screening_cycle_identifier,
+        evaluated_at=result.decision_as_of,
+    )
     _atomic_json(
         settings.portfolio_database.parent / CAPABILITY_REPORT_FILENAME,
         payload,
