@@ -16,20 +16,31 @@ from operations.global_opportunity_reassessment import (
 
 
 MaterialCIOReassessmentEngine = GlobalOpportunityMaterialCIOReassessmentEngine
+_OPPORTUNITY_SCAN_MAX_INTERVAL = timedelta(minutes=1)
 
 
 def build_default_reassessment_engine(
     settings: ApiSettings,
 ) -> MaterialCIOReassessmentEngine:
     root = settings.portfolio_database.parent
+    configured_scan = timedelta(seconds=settings.scheduler_scan_seconds)
     return MaterialCIOReassessmentEngine(
         state_path=root / "cio-material-reassessment-state.json",
         timezone_name=settings.scheduler_timezone,
         schedule_times=settings.scheduler_times,
-        scan_interval=timedelta(seconds=settings.scheduler_scan_seconds),
+        # Scheduled full-market cycles remain backstops. Opportunity detection is
+        # allowed to request the CIO at least once per minute even when an older
+        # deployment still carries a slower scheduler scan setting.
+        scan_interval=min(configured_scan, _OPPORTUNITY_SCAN_MAX_INTERVAL),
+        # The historical setting is retained as a same-opportunity deduplication
+        # lifetime. It no longer suppresses a different opportunity.
         event_cooldown=timedelta(
             minutes=settings.scheduler_event_cooldown_minutes
         ),
+        # Distinct event-cycle keys already provide collision protection, so there
+        # is no reason to suppress a real opportunity merely because a scheduled
+        # review is imminent or just completed.
+        scheduled_guard=timedelta(0),
         benchmark_move_threshold=settings.scheduler_benchmark_move_threshold,
         instrument_move_threshold=settings.scheduler_instrument_move_threshold,
         company_move_threshold=settings.scheduler_company_move_threshold,
