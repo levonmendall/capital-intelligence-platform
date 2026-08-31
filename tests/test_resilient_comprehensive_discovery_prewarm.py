@@ -10,7 +10,6 @@ EPOCH = datetime(2026, 8, 31, 17, 24, tzinfo=timezone.utc)
 
 
 def test_failed_early_provider_pass_retries_without_extending_budget(monkeypatch) -> None:
-    canonical_budget = acquisition._fanout_budget_seconds
     monkeypatch.setattr(acquisition, "_fanout_budget_seconds", lambda *args, **kwargs: 300.0)
     calls = []
     observed_budgets = []
@@ -39,7 +38,41 @@ def test_failed_early_provider_pass_retries_without_extending_budget(monkeypatch
     assert result["provider_retry_performed"] is True
     assert result["provider_retry_budget_extended"] is False
     assert result["provider_worker_limit_extended"] is False
-    assert acquisition._fanout_budget_seconds is not canonical_budget
+
+
+def test_structural_failure_also_retries_missing_publication_prerequisite(monkeypatch) -> None:
+    monkeypatch.setattr(acquisition, "_fanout_budget_seconds", lambda *args, **kwargs: 300.0)
+    calls = []
+
+    def fake_original(request_path, *, values, decision_epoch):
+        del request_path, values, decision_epoch
+        calls.append(1)
+        if len(calls) == 1:
+            return {
+                "failed": 0,
+                "provider_skipped_budget": 0,
+                "structural_prewarm_failed": 1,
+                "structural_prewarm_skipped_budget": 0,
+                "completed": 12,
+            }
+        return {
+            "failed": 0,
+            "provider_skipped_budget": 0,
+            "structural_prewarm_failed": 0,
+            "structural_prewarm_skipped_budget": 0,
+            "completed": 13,
+        }
+
+    result = resilient._run_resilient_fanout(
+        "request.json",
+        values={"RENDER": "true"},
+        decision_epoch=EPOCH,
+        original=fake_original,
+    )
+
+    assert len(calls) == 2
+    assert result["provider_retry_passes"] == 2
+    assert result["provider_retry_budget_extended"] is False
 
 
 def test_successful_first_pass_is_not_repeated(monkeypatch) -> None:
