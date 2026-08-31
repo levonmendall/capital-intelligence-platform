@@ -117,9 +117,23 @@ def test_repeated_failures_never_exceed_bounded_pass_count(monkeypatch) -> None:
     assert result["provider_retry_budget_extended"] is False
 
 
-def test_install_routes_future_sidecars_through_resilient_module(monkeypatch) -> None:
-    monkeypatch.setattr(resilient._base, "_MODULE", "operations.original_prewarm")
+def test_install_does_not_redirect_when_canonical_prewarm_has_builtin_replay(monkeypatch) -> None:
+    original_module = "operations.original_prewarm"
+    monkeypatch.setattr(resilient._base, "_MODULE", original_module)
     monkeypatch.delattr(resilient._base, resilient._INSTALLED_ATTR, raising=False)
+    assert callable(getattr(resilient._base, resilient._BUILTIN_REPLAY_ATTR, None))
+
+    resilient.install()
+
+    assert resilient._base._MODULE == original_module
+    assert getattr(resilient._base, resilient._INSTALLED_ATTR) is True
+
+
+def test_legacy_install_redirects_only_without_builtin_replay(monkeypatch) -> None:
+    original_module = "operations.original_prewarm"
+    monkeypatch.setattr(resilient._base, "_MODULE", original_module)
+    monkeypatch.delattr(resilient._base, resilient._INSTALLED_ATTR, raising=False)
+    monkeypatch.delattr(resilient._base, resilient._BUILTIN_REPLAY_ATTR, raising=False)
 
     resilient.install()
 

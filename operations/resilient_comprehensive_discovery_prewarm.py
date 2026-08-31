@@ -1,17 +1,15 @@
-"""Retry failed comprehensive provider prerequisites inside the existing early window.
+"""Compatibility wrapper for bounded early provider prerequisite retries.
 
 The canonical transactional lane is deliberately reuse-only: it may consume an exact-epoch
 provider publication produced by the early acquisition owner but may not start a second late
-network fallback. A transient early structure or provider-child failure can therefore leave
-no reusable publication, making the later canonical lane fail immediately.
+network fallback. This module originally supplied bounded multi-pass retry behavior by
+redirecting the prewarm sidecar to a second wrapper module.
 
-This wrapper gives the existing early owner a bounded retry opportunity without changing its
-resource contract. All passes share the *original* fanout budget calculated at sidecar
-start; each later pass is capped to the remaining portion of that same budget. Existing
-clean structures and publications are reused, so retry passes spend expensive work only on
-prerequisites that remain absent. The six-worker cap, 300-second acceleration ceiling,
-downstream reserve, evidence freshness, market scope, screening, CIO authority,
-construction, paper-only execution, and real-money prohibition remain unchanged.
+PR #883 moved bounded unresolved-lane replay directly into the canonical early prewarm
+owner. When that built-in replay is present, installing this compatibility module must not
+redirect the sidecar again or create nested retry layers. Older compositions may still use
+the legacy wrapper, always inside the original provider-acquisition budget. No evidence,
+market, CIO, construction, execution, or real-money rule is changed.
 """
 
 from __future__ import annotations
@@ -29,6 +27,7 @@ from operations import epoch_scoped_provider_acquisition as _acquisition
 _MODULE = "operations.resilient_comprehensive_discovery_prewarm"
 _MAX_PROVIDER_PASSES = 3
 _INSTALLED_ATTR = "_resilient_comprehensive_provider_prewarm_installed"
+_BUILTIN_REPLAY_ATTR = "_run_epoch_provider_fanout_with_bounded_replay"
 _RETRY_COUNTERS = (
     "failed",
     "provider_skipped_budget",
@@ -50,7 +49,7 @@ def _run_resilient_fanout(
     decision_epoch: datetime,
     original,
 ) -> Mapping[str, object]:
-    """Run up to three passes while sharing one immutable initial acquisition budget."""
+    """Run legacy retry passes while sharing one immutable initial acquisition budget."""
 
     initial_budget = float(_acquisition._fanout_budget_seconds(decision_epoch, values))
     if initial_budget <= 0.0:
@@ -120,7 +119,7 @@ def prewarm_epoch_provider_inputs(
     evidence_as_of: datetime,
     values: Mapping[str, str] | None = None,
 ) -> Mapping[str, object]:
-    """Run the canonical prewarm with resilient prerequisite retries inside its original budget."""
+    """Run the legacy bounded retry wrapper for pre-#883 runtime compositions."""
 
     original = _acquisition.run_provider_acquisition_fanout
 
@@ -143,9 +142,15 @@ def prewarm_epoch_provider_inputs(
 
 
 def install() -> None:
-    """Route future Render prewarm sidecars through this bounded retry wrapper."""
+    """Install only when the canonical early owner does not already provide bounded replay."""
 
     if getattr(_base, _INSTALLED_ATTR, False):
+        return
+    if callable(getattr(_base, _BUILTIN_REPLAY_ATTR, None)):
+        # Current main owns replay directly in the canonical prewarm module. Mark this
+        # compatibility layer satisfied without changing the sidecar module or adding a
+        # second retry owner.
+        setattr(_base, _INSTALLED_ATTR, True)
         return
     _base._MODULE = _MODULE
     setattr(_base, _INSTALLED_ATTR, True)
@@ -168,6 +173,7 @@ if __name__ == "__main__":
 
 
 __all__ = [
+    "_BUILTIN_REPLAY_ATTR",
     "_MAX_PROVIDER_PASSES",
     "_needs_retry",
     "_run_resilient_fanout",
