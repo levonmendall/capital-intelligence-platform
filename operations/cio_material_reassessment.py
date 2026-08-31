@@ -18,6 +18,9 @@ from operations.free_paper_pilot import (
 )
 
 
+_OPPORTUNITY_TRIGGER_HISTORY_LIMIT = 1024
+
+
 def aware_utc(value: datetime, name: str = "time") -> datetime:
     if not isinstance(value, datetime):
         raise TypeError(f"{name} must be a datetime")
@@ -67,11 +70,19 @@ def parse_datetime(value: object) -> datetime | None:
 
 
 def field(source: object | None, name: str, default=None):
-    return source.get(name, default) if isinstance(source, Mapping) else getattr(source, name, default)
+    return (
+        source.get(name, default)
+        if isinstance(source, Mapping)
+        else getattr(source, name, default)
+    )
 
 
 def snapshot_price(snapshot: Mapping[str, Any]) -> float | None:
-    for key, price_key in (("latestTrade", "p"), ("minuteBar", "c"), ("dailyBar", "c")):
+    for key, price_key in (
+        ("latestTrade", "p"),
+        ("minuteBar", "c"),
+        ("dailyBar", "c"),
+    ):
         item = snapshot.get(key)
         if not isinstance(item, Mapping):
             continue
@@ -93,6 +104,10 @@ def previous_close(snapshot: Mapping[str, Any]) -> float | None:
     except (TypeError, ValueError):
         return None
     return value if value > 0 else None
+
+
+def _direction(value: float) -> str:
+    return "up" if value >= 0.0 else "down"
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,7 +133,9 @@ class MaterialCIOReassessmentEngine:
     """Request a full CIO review only when live evidence changes materially.
 
     The scanner has no candidate, action, sizing, construction, execution, or
-    real-money authority.
+    real-money authority. Distinct opportunity conditions are independently
+    idempotent: one recent event can never suppress another opportunity merely
+    because both occurred inside the same wall-clock cooldown window.
     """
 
     def __init__(
@@ -127,19 +144,23 @@ class MaterialCIOReassessmentEngine:
         state_path: str | Path,
         timezone_name: str,
         schedule_times: Sequence[str],
-        scan_interval: timedelta = timedelta(minutes=5),
+        scan_interval: timedelta = timedelta(minutes=1),
         event_cooldown: timedelta = timedelta(minutes=30),
         benchmark_move_threshold: float = 0.01,
         instrument_move_threshold: float = 0.03,
         company_move_threshold: float = 0.05,
-        scheduled_guard: timedelta = timedelta(minutes=10),
+        scheduled_guard: timedelta = timedelta(0),
         client_factory: Callable[[], object] = default_alpaca_client,
         direct_client_factory: Callable[[], object] = DirectGlobalMarketClient,
         active_universe_path: str | Path | None = None,
         fallback_universe_path: str | Path = DEFAULT_UNIVERSE_PATH,
     ) -> None:
-        if scan_interval < timedelta(minutes=1) or event_cooldown < timedelta(minutes=1):
-            raise ValueError("scan interval and cooldown must be at least one minute")
+        if scan_interval < timedelta(minutes=1):
+            raise ValueError("scan interval must be at least one minute")
+        if event_cooldown < timedelta(minutes=1):
+            raise ValueError("opportunity deduplication lifetime must be at least one minute")
+        if scheduled_guard < timedelta(0):
+            raise ValueError("scheduled guard cannot be negative")
         thresholds = (
             benchmark_move_threshold,
             instrument_move_threshold,
@@ -151,6 +172,9 @@ class MaterialCIOReassessmentEngine:
         self.timezone = ZoneInfo(timezone_name)
         self.schedule_times = tuple(parse_clock(item) for item in schedule_times)
         self.scan_interval = scan_interval
+        # Kept under the existing configuration name for compatibility. It now
+        # scopes only repetition of the same opportunity key; it is not a global
+        # event-review cooldown.
         self.event_cooldown = event_cooldown
         self.benchmark_move_threshold = float(benchmark_move_threshold)
         self.instrument_move_threshold = float(instrument_move_threshold)
@@ -166,6 +190,8 @@ class MaterialCIOReassessmentEngine:
         self.fallback_universe_path = Path(fallback_universe_path).expanduser()
 
     def _guarded(self, now: datetime) -> bool:
+        if self.scheduled_guard <= timedelta(0):
+            return False
         local = now.astimezone(self.timezone)
         return any(
             abs(
@@ -182,6 +208,159 @@ class MaterialCIOReassessmentEngine:
             <= self.scheduled_guard.total_seconds()
             for item in self.schedule_times
         )
+
+    def _recent_opportunity_claims(
+        self,
+        state: Mapping[str, Any],
+        *,
+        now: datetime,
+    ) -> dict[str, datetime]:
+        raw = state.get("recent_opportunity_claims")
+        if not isinstance(raw, Mapping):
+            return {}
+        recent: dict[str, datetime] = {}
+        for raw_key, raw_time in raw.items():
+            key = str(raw_key).strip()
+            claimed_at = parse_datetime(raw_time)
+            if not key or claimed_at is None:
+                continue
+            elapsed = now - claimed_at
+            if elapsed < timedelta(0) or elapsed < self.event_cooldown:
+                recent[key] = claimed_at
+        return recent
+
+    def _record_trigger(
+        self,
+        state: dict[str, Any],
+        *,
+        trigger_key: str,
+        opportunity_keys: Sequence[str],
+        fingerprint: str,
+        timestamp: datetime,
+    ) -> None:
+        recent = self._recent_opportunity_claims(state, now=timestamp)
+        for key in opportunity_keys:
+            recent[str(key)] = timestamp
+        state["recent_opportunity_claims"] = {
+            key: value.isoformat() for key, value in sorted(recent.items())
+        }
+        records = state.get("opportunity_trigger_records")
+        normalized = [
+            dict(item)
+            for item in (records if isinstance(records, list) else ())
+            if isinstance(item, Mapping)
+        ]
+        normalized.append(
+            {
+                "trigger_key": trigger_key,
+                "triggered_at": timestamp.isoformat(),
+                "fingerprint": fingerprint,
+                "opportunity_keys": list(dict.fromkeys(opportunity_keys)),
+            }
+        )
+        state["opportunity_trigger_records"] = normalized[
+            -_OPPORTUNITY_TRIGGER_HISTORY_LIMIT:
+        ]
+        # Compatibility fields remain available to diagnostics and older readers,
+        # but they no longer provide global suppression authority.
+        state.update(
+            {
+                "last_triggered_at": timestamp.isoformat(),
+                "last_trigger_fingerprint": fingerprint,
+                "last_trigger_key": trigger_key,
+            }
+        )
+
+    def _claim_distinct_opportunities(
+        self,
+        state: dict[str, Any],
+        *,
+        opportunity_keys: Sequence[str],
+        timestamp: datetime,
+        prefix: str,
+    ) -> tuple[str | None, tuple[str, ...]]:
+        keys = tuple(
+            dict.fromkeys(str(item).strip() for item in opportunity_keys if str(item).strip())
+        )
+        recent = self._recent_opportunity_claims(state, now=timestamp)
+        new_keys = tuple(key for key in keys if key not in recent)
+        state["recent_opportunity_claims"] = {
+            key: value.isoformat() for key, value in sorted(recent.items())
+        }
+        if not new_keys:
+            return None, ()
+        fingerprint = hashlib.sha256(
+            json.dumps(
+                {"opportunity_keys": sorted(new_keys)},
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        local = timestamp.astimezone(self.timezone)
+        trigger_key = f"{prefix}-{local.strftime('%Y%m%d-%H%M%S')}-{fingerprint[:12]}"
+        self._record_trigger(
+            state,
+            trigger_key=trigger_key,
+            opportunity_keys=new_keys,
+            fingerprint=fingerprint,
+            timestamp=timestamp,
+        )
+        return trigger_key, new_keys
+
+    def _attach_opportunities_to_trigger(
+        self,
+        state: dict[str, Any],
+        *,
+        trigger_key: str,
+        opportunity_keys: Sequence[str],
+        timestamp: datetime,
+    ) -> tuple[str, ...]:
+        keys = tuple(
+            dict.fromkeys(str(item).strip() for item in opportunity_keys if str(item).strip())
+        )
+        recent = self._recent_opportunity_claims(state, now=timestamp)
+        new_keys = tuple(key for key in keys if key not in recent)
+        if not new_keys:
+            state["recent_opportunity_claims"] = {
+                key: value.isoformat() for key, value in sorted(recent.items())
+            }
+            return ()
+        for key in new_keys:
+            recent[key] = timestamp
+        state["recent_opportunity_claims"] = {
+            key: value.isoformat() for key, value in sorted(recent.items())
+        }
+        records = state.get("opportunity_trigger_records")
+        normalized = [
+            dict(item)
+            for item in (records if isinstance(records, list) else ())
+            if isinstance(item, Mapping)
+        ]
+        matched = False
+        for item in normalized:
+            if str(item.get("trigger_key", "")) != trigger_key:
+                continue
+            existing = tuple(
+                str(value)
+                for value in (item.get("opportunity_keys", ()) or ())
+                if str(value).strip()
+            )
+            item["opportunity_keys"] = list(dict.fromkeys((*existing, *new_keys)))
+            matched = True
+            break
+        if not matched:
+            normalized.append(
+                {
+                    "trigger_key": trigger_key,
+                    "triggered_at": timestamp.isoformat(),
+                    "fingerprint": str(state.get("last_trigger_fingerprint", "")),
+                    "opportunity_keys": list(new_keys),
+                }
+            )
+        state["opportunity_trigger_records"] = normalized[
+            -_OPPORTUNITY_TRIGGER_HISTORY_LIMIT:
+        ]
+        return new_keys
 
     def _instruments(self) -> tuple[tuple[str, str], ...]:
         payload = load_json(self.active_universe_path)
@@ -232,7 +411,7 @@ class MaterialCIOReassessmentEngine:
             return ReassessmentResult(
                 "not_due",
                 timestamp,
-                detail="The five-minute materiality scan is not due.",
+                detail="The one-minute materiality scan is not due.",
             )
         if self._guarded(timestamp):
             state["last_scanned_at"] = timestamp.isoformat()
@@ -240,14 +419,22 @@ class MaterialCIOReassessmentEngine:
             return ReassessmentResult(
                 "scheduled_guard",
                 timestamp,
-                detail="A scheduled full CIO review is imminent or just completed.",
+                detail="A configured scheduled-cycle guard is active.",
             )
 
         try:
             instruments = self._instruments()
             direct_types = {"spot", "token", "future"}
-            listed_symbols = tuple(symbol for symbol, instrument_type in instruments if instrument_type not in direct_types)
-            direct_symbols = tuple(symbol for symbol, instrument_type in instruments if instrument_type in direct_types)
+            listed_symbols = tuple(
+                symbol
+                for symbol, instrument_type in instruments
+                if instrument_type not in direct_types
+            )
+            direct_symbols = tuple(
+                symbol
+                for symbol, instrument_type in instruments
+                if instrument_type in direct_types
+            )
             client = self.client_factory()
             listed_open = client.clock().get("is_open") is True
             snapshots: dict[str, Mapping[str, Any]] = {}
@@ -262,7 +449,11 @@ class MaterialCIOReassessmentEngine:
             if not listed_open and not direct_open:
                 state["last_scanned_at"] = timestamp.isoformat()
                 save_json(self.state_path, state)
-                return ReassessmentResult("market_closed", timestamp, detail="No governed listed or direct market is currently open.")
+                return ReassessmentResult(
+                    "market_closed",
+                    timestamp,
+                    detail="No governed listed or direct market is currently open.",
+                )
         except Exception as error:
             return ReassessmentResult(
                 "failed",
@@ -275,8 +466,10 @@ class MaterialCIOReassessmentEngine:
             if isinstance(state.get("assessment_prices"), Mapping)
             else {}
         )
+        baseline_revision = int(state.get("baseline_revision", 0) or 0)
         prices: dict[str, float] = {}
         reasons: list[str] = []
+        opportunity_keys: list[str] = []
         for symbol, instrument_type in instruments:
             snapshot = snapshots.get(symbol)
             if not isinstance(snapshot, Mapping):
@@ -295,12 +488,27 @@ class MaterialCIOReassessmentEngine:
                     reasons.append(
                         f"benchmark {symbol} moved {day_move:+.2%} from the prior close"
                     )
-                company = instrument_type == "common_stock"
-                threshold = {"common_stock": self.company_move_threshold, "spot": 0.0075, "token": 0.04, "future": 0.015}.get(instrument_type, self.instrument_move_threshold)
+                    opportunity_keys.append(
+                        f"benchmark-move:{symbol}:prior-close:{_direction(day_move)}"
+                    )
+                threshold = {
+                    "common_stock": self.company_move_threshold,
+                    "spot": 0.0075,
+                    "token": 0.04,
+                    "future": 0.015,
+                }.get(instrument_type, self.instrument_move_threshold)
                 if abs(day_move) >= threshold:
-                    label = {"common_stock": "company", "spot": "spot FX market", "token": "crypto market", "future": "futures market"}.get(instrument_type, "instrument")
+                    label = {
+                        "common_stock": "company",
+                        "spot": "spot FX market",
+                        "token": "crypto market",
+                        "future": "futures market",
+                    }.get(instrument_type, "instrument")
                     reasons.append(
                         f"{label} {symbol} moved {day_move:+.2%} from the prior close"
+                    )
+                    opportunity_keys.append(
+                        f"market-move:{symbol}:prior-close:{_direction(day_move)}"
                     )
             baseline = baselines.get(symbol)
             if isinstance(baseline, (int, float)) and float(baseline) > 0:
@@ -308,6 +516,10 @@ class MaterialCIOReassessmentEngine:
                 if abs(move) >= self.instrument_move_threshold:
                     reasons.append(
                         f"{symbol} moved {move:+.2%} since the last full CIO assessment"
+                    )
+                    opportunity_keys.append(
+                        "assessment-move:"
+                        f"{baseline_revision}:{symbol}:{_direction(move)}"
                     )
 
         public_at, public_count = self._public_state(public_collection)
@@ -323,10 +535,11 @@ class MaterialCIOReassessmentEngine:
                 "governed public-information records increased from "
                 f"{previous_public_count} to {public_count}"
             )
+            opportunity_keys.append(f"public-record-set:{public_at}:{public_count}")
 
         state.update(
             {
-                "schema_version": "cio-material-reassessment-state.v1",
+                "schema_version": "cio-material-reassessment-state.v2",
                 "last_scanned_at": timestamp.isoformat(),
                 "last_prices": prices,
                 "public_completed_at": public_at,
@@ -336,7 +549,13 @@ class MaterialCIOReassessmentEngine:
             }
         )
         reasons = list(dict.fromkeys(reasons))
+        opportunity_keys = list(dict.fromkeys(opportunity_keys))
         if not reasons:
+            # Prune expired claims even during quiet scans so state remains bounded.
+            recent = self._recent_opportunity_claims(state, now=timestamp)
+            state["recent_opportunity_claims"] = {
+                key: value.isoformat() for key, value in sorted(recent.items())
+            }
             save_json(self.state_path, state)
             return ReassessmentResult(
                 "no_material_change",
@@ -345,47 +564,26 @@ class MaterialCIOReassessmentEngine:
                 detail="No configured materiality threshold was crossed.",
             )
 
-        fingerprint = hashlib.sha256(
-            json.dumps(
-                {
-                    "revision": int(state.get("baseline_revision", 0) or 0),
-                    "reasons": reasons,
-                },
-                sort_keys=True,
-            ).encode()
-        ).hexdigest()
-        last_triggered = parse_datetime(state.get("last_triggered_at"))
-        if state.get("last_trigger_fingerprint") == fingerprint:
+        trigger, claimed = self._claim_distinct_opportunities(
+            state,
+            opportunity_keys=opportunity_keys,
+            timestamp=timestamp,
+            prefix="material",
+        )
+        if trigger is None:
             save_json(self.state_path, state)
             return ReassessmentResult(
                 "deduplicated",
                 timestamp,
                 reasons=tuple(reasons),
                 symbol_count=len(prices),
-                detail="The same material condition already requested a CIO reassessment.",
-            )
-        if (
-            last_triggered is not None
-            and timestamp - last_triggered < self.event_cooldown
-        ):
-            save_json(self.state_path, state)
-            return ReassessmentResult(
-                "cooldown",
-                timestamp,
-                reasons=tuple(reasons),
-                symbol_count=len(prices),
-                detail="A recent event review is inside the deduplication cooldown.",
+                detail=(
+                    "Every currently material opportunity already requested a CIO "
+                    "reassessment inside its own deduplication window."
+                ),
             )
 
-        local = timestamp.astimezone(self.timezone)
-        trigger = f"material-{local.strftime('%Y%m%d-%H%M')}-{fingerprint[:12]}"
-        state.update(
-            {
-                "last_triggered_at": timestamp.isoformat(),
-                "last_trigger_fingerprint": fingerprint,
-                "last_trigger_key": trigger,
-            }
-        )
+        state["last_trigger_opportunity_keys"] = list(claimed)
         save_json(self.state_path, state)
         return ReassessmentResult(
             "triggered",
@@ -394,19 +592,51 @@ class MaterialCIOReassessmentEngine:
             trigger,
             tuple(reasons),
             len(prices),
-            "Material live evidence requests a full canonical CIO reassessment.",
+            (
+                "Distinct material live evidence requests a full canonical CIO "
+                "reassessment; unrelated recent events do not suppress it."
+            ),
         )
 
     def release_trigger(self, trigger_key: str) -> None:
         state = load_json(self.state_path)
+        records = state.get("opportunity_trigger_records")
+        normalized = [
+            dict(item)
+            for item in (records if isinstance(records, list) else ())
+            if isinstance(item, Mapping)
+        ]
+        released_keys: set[str] = set()
+        retained: list[dict[str, Any]] = []
+        for item in normalized:
+            if str(item.get("trigger_key", "")) == trigger_key:
+                released_keys.update(
+                    str(value)
+                    for value in (item.get("opportunity_keys", ()) or ())
+                    if str(value).strip()
+                )
+            else:
+                retained.append(item)
+        if released_keys:
+            recent = state.get("recent_opportunity_claims")
+            if isinstance(recent, Mapping):
+                state["recent_opportunity_claims"] = {
+                    str(key): value
+                    for key, value in recent.items()
+                    if str(key) not in released_keys
+                }
+            state["opportunity_trigger_records"] = retained[
+                -_OPPORTUNITY_TRIGGER_HISTORY_LIMIT:
+            ]
         if state.get("last_trigger_key") == trigger_key:
             for key in (
                 "last_triggered_at",
                 "last_trigger_fingerprint",
                 "last_trigger_key",
+                "last_trigger_opportunity_keys",
             ):
                 state.pop(key, None)
-            save_json(self.state_path, state)
+        save_json(self.state_path, state)
 
     def acknowledge_assessment(self, *, now: datetime) -> None:
         timestamp = aware_utc(now, "now")
