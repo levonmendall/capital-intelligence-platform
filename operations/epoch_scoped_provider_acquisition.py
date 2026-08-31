@@ -25,9 +25,10 @@ transactional lane design removed.
 The early fan-out remains provider-I/O acceleration only. Provider output is written to a
 staging path and is atomically promoted to the canonical lane path only when the provider
 runtime reports no limitations. A throttled, partial, or otherwise limited result is
-removed. When the later comprehensive spool builder re-enters this wrapper it runs the same
-lane fanout in reuse-only mode: clean exact-request publications may be validated and reused,
-but a missing or invalid publication cannot trigger a second provider-network acquisition.
+removed. When the later comprehensive spool builder re-enters this wrapper it validates
+every scheduled cacheable lane directly in reuse-only mode: clean exact-request
+publications may be reused, but a missing or invalid publication cannot trigger a second
+provider-network acquisition and the serialized transaction cannot begin on a partial set.
 The serialized transactional lane independently enforces the same reuse-only contract.
 
 Neither structural preparation nor provider fan-out has evidence, candidate, sizing,
@@ -733,7 +734,7 @@ def prepare_lane_provider_publication(
 
 
 def install_epoch_scoped_provider_acquisition() -> None:
-    """Wrap canonical spooling with early-acquisition reuse validation on Render."""
+    """Wrap canonical spooling with exact-epoch publication validation on Render."""
 
     from operations import bounded_comprehensive_discovery_spool as bounded
     from operations import comprehensive_discovery_input_spool as legacy
@@ -758,21 +759,27 @@ def install_epoch_scoped_provider_acquisition() -> None:
                 )
                 reuse_only_values = dict(resolved)
                 reuse_only_values[_REUSE_ONLY_ENV] = "true"
-                run_provider_acquisition_fanout(
-                    path,
-                    values=reuse_only_values,
-                    decision_epoch=epoch,
-                )
-            except Exception as error:  # noqa: BLE001 - canonical lane remains fail-closed.
+                for index, asset_class in _scheduled_lane_items(epoch):
+                    prepare_lane_provider_publication(
+                        path,
+                        values=reuse_only_values,
+                        asset_class_value=asset_class.value,
+                        index=index,
+                    )
+            except Exception as error:  # noqa: BLE001 - handoff must terminate fail-closed.
                 print(
                     json.dumps(
                         {
-                            "event": "epoch_scoped_provider_acquisition_fanout_unavailable",
+                            "event": "epoch_scoped_provider_publication_handoff_failed",
                             "error_type": type(error).__name__,
+                            "error_detail": str(error)[:1200],
                             "reuse_only": True,
-                            "advisory_only": True,
+                            "advisory_only": False,
                             "evidence_certified": False,
                             "decision_authority": False,
+                            "candidate_authority": False,
+                            "sizing_authority": False,
+                            "construction_authority": False,
                             "execution_authority": False,
                             "paper_only": True,
                             "real_money_authorized": False,
@@ -782,6 +789,7 @@ def install_epoch_scoped_provider_acquisition() -> None:
                     ),
                     flush=True,
                 )
+                raise
         return current(request_path, values=resolved)
 
     build_spool._epoch_scoped_provider_acquisition = True  # type: ignore[attr-defined]

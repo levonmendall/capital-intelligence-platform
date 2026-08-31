@@ -639,7 +639,9 @@ def test_lane_fanout_cache_miss_falls_back_without_reconstruction(monkeypatch, t
         )
 
 
-def test_runtime_wrapper_runs_acceleration_before_canonical_builder(monkeypatch, tmp_path) -> None:
+def test_runtime_wrapper_validates_reuse_only_handoff_before_canonical_builder(
+    monkeypatch, tmp_path
+) -> None:
     from operations import bounded_comprehensive_discovery_spool as bounded
     from operations import comprehensive_discovery_input_spool as legacy
     from operations import spawn_safe_authoritative_acquisition as spawn_safe
@@ -648,6 +650,10 @@ def test_runtime_wrapper_runs_acceleration_before_canonical_builder(monkeypatch,
     request_path = tmp_path / "request.json"
     request_path.write_text("{}", encoding="utf-8")
     timestamp = _epoch()
+    lanes = (
+        (0, CandidateAssetClass.US_EQUITY),
+        (4, CandidateAssetClass.INTERNATIONAL_EQUITY),
+    )
 
     def canonical(path, *, values=None):
         events.append(("canonical", Path(path), dict(values or {})))
@@ -660,14 +666,28 @@ def test_runtime_wrapper_runs_acceleration_before_canonical_builder(monkeypatch,
         lambda _path, _values: ({"decision_epoch": timestamp.isoformat()}, object()),
     )
     monkeypatch.setattr(legacy, "_parse_timestamp", lambda _value, field_name: timestamp)
+    monkeypatch.setattr(fanout, "_scheduled_lane_items", lambda _epoch: lanes)
     monkeypatch.setattr(
         fanout,
         "run_provider_acquisition_fanout",
-        lambda path, *, values, decision_epoch: events.append(
-            ("fanout", Path(path), decision_epoch, dict(values))
-        )
-        or {},
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("runtime handoff must not start budgeted provider fanout")
+        ),
     )
+
+    def validate(path, *, values, asset_class_value, index):
+        events.append(
+            (
+                "validate",
+                int(index),
+                str(asset_class_value),
+                Path(path),
+                dict(values),
+            )
+        )
+        return {"publication_ready": True, "reused": True}
+
+    monkeypatch.setattr(fanout, "prepare_lane_provider_publication", validate)
 
     fanout.install_epoch_scoped_provider_acquisition()
     wrapped = spawn_safe.build_spool
@@ -676,7 +696,15 @@ def test_runtime_wrapper_runs_acceleration_before_canonical_builder(monkeypatch,
     result = wrapped(request_path, values={"RENDER": "true", "X": "1"})
 
     assert result == request_path.with_name("manifest.json")
-    assert events[0][:3] == ("fanout", request_path, timestamp)
-    assert events[1][:2] == ("canonical", request_path)
-    assert events[0][3]["X"] == "1"
-    assert events[1][2]["X"] == "1"
+    assert [event[:3] for event in events[:2]] == [
+        ("validate", 0, CandidateAssetClass.US_EQUITY.value),
+        ("validate", 4, CandidateAssetClass.INTERNATIONAL_EQUITY.value),
+    ]
+    assert events[0][3] == request_path
+    assert events[1][3] == request_path
+    assert events[0][4]["X"] == "1"
+    assert events[0][4][fanout._REUSE_ONLY_ENV] == "true"
+    assert events[1][4][fanout._REUSE_ONLY_ENV] == "true"
+    assert events[2][:2] == ("canonical", request_path)
+    assert events[2][2]["X"] == "1"
+    assert fanout._REUSE_ONLY_ENV not in events[2][2]
