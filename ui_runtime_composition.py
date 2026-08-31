@@ -13,6 +13,7 @@ import opportunity_funnel_ui_refinement
 import portfolio_evidence_accumulation_ui
 import portfolio_only_runtime
 import portfolio_ui_refinement
+import production_state_ui_runtime
 import secure_app
 import surface_content_refinement
 import surface_route_isolation_runtime
@@ -61,12 +62,13 @@ def install_canonical_surface_composition(
 
     # Portfolio-only presentation is deliberately installed last so the complete
     # underlying surfaces stay available to code/tests while Render exposes only the
-    # canonical portfolio during the operating phase. Evidence accumulation replaces
-    # only the read-only asset-class presentation, then certification provenance wraps
-    # that final renderer so both surfaces share one exact-release envelope.
+    # canonical portfolio. Evidence and certification render first; the production-state
+    # binding is outermost so one exact-release envelope supplies operating state,
+    # per-asset-class state, certification provenance, and explicit historical context.
     portfolio_only_runtime.install(app_impl, secure_app)
     portfolio_evidence_accumulation_ui.install(portfolio_only_runtime)
     all_market_certification_ui.install(portfolio_only_runtime)
+    production_state_ui_runtime.install(portfolio_only_runtime)
 
 
 __all__ = ["install_canonical_surface_composition"]
