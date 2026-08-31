@@ -1,28 +1,24 @@
 """Cross-market leadership trigger for the canonical CIO reassessment loop.
 
-The existing reassessment stack already owns market snapshots, schedule guards,
-content materiality, reactive thesis dependencies, deduplication, and cooldown.  This
-layer adds one missing question: has relative leadership moved far enough across the
-active global opportunity set that the CIO should reconsider where marginal capital
-belongs?
+The existing reassessment stack owns market snapshots, content materiality, reactive
+thesis dependencies, and opportunity-specific deduplication. This layer asks whether
+relative leadership moved far enough across the active global opportunity set that the
+CIO should reconsider where marginal capital belongs.
 
-It can request reassessment only.  It cannot create a candidate, choose an action,
-size capital, construct a portfolio, execute a fill, or authorize real money.
+Distinct leadership changes may request reassessment immediately even when another
+unrelated CIO event was reviewed recently. The trigger itself has no candidate,
+action, sizing, construction, execution, or real-money authority.
 """
 
 from __future__ import annotations
 
-import hashlib
-import json
 from datetime import datetime
-from pathlib import Path
 from typing import Any, Mapping
 
 from operations.cio_material_reassessment import (
     ReassessmentResult,
     aware_utc,
     load_json,
-    parse_datetime,
     save_json,
 )
 from operations.reactive_investor_material_reassessment import (
@@ -110,6 +106,12 @@ class GlobalOpportunityMaterialCIOReassessmentEngine(
         *,
         state: Mapping[str, Any],
     ) -> tuple[str | None, tuple[str, ...], Mapping[str, float]]:
+        """Return the historical three-value leadership contract.
+
+        Opportunity identities are intentionally derived separately so existing
+        diagnostics/tests that consume this private analytical helper remain stable.
+        """
+
         current = state.get("last_prices")
         baseline = state.get("assessment_prices")
         if not isinstance(current, Mapping) or not isinstance(baseline, Mapping):
@@ -134,11 +136,17 @@ class GlobalOpportunityMaterialCIOReassessmentEngine(
         if len(moves) < 2:
             return None, (), {}
         domain_scores = {
-            domain: sum(values) / len(values) for domain, values in moves.items() if values
+            domain: sum(values) / len(values)
+            for domain, values in moves.items()
+            if values
         }
         if len(domain_scores) < 2:
             return None, (), {}
-        ordered = sorted(domain_scores.items(), key=lambda item: (item[1], item[0]), reverse=True)
+        ordered = sorted(
+            domain_scores.items(),
+            key=lambda item: (item[1], item[0]),
+            reverse=True,
+        )
         leader, leader_score = ordered[0]
         runner_up_score = ordered[1][1]
         spread = leader_score - runner_up_score
@@ -169,9 +177,52 @@ class GlobalOpportunityMaterialCIOReassessmentEngine(
             and leader_score - prior_score_value >= self.leadership_change_threshold
         ):
             reasons.append(
-                f"{leader} leadership strengthened by {leader_score - prior_score_value:+.2%} since the last acknowledged CIO assessment"
+                f"{leader} leadership strengthened by "
+                f"{leader_score - prior_score_value:+.2%} since the last "
+                "acknowledged CIO assessment"
             )
         return leader, tuple(dict.fromkeys(reasons)), domain_scores
+
+    def _leadership_opportunity_keys(
+        self,
+        *,
+        state: Mapping[str, Any],
+        leader: str,
+        domain_scores: Mapping[str, float],
+    ) -> tuple[str, ...]:
+        ordered = sorted(
+            domain_scores.items(),
+            key=lambda item: (item[1], item[0]),
+            reverse=True,
+        )
+        if len(ordered) < 2:
+            return ()
+        leader_score = float(domain_scores[leader])
+        runner_up, runner_up_score = ordered[1]
+        spread = leader_score - runner_up_score
+        prior_leader = str(state.get("global_opportunity_leader_domain", "")).strip()
+        prior_score = state.get("global_opportunity_leader_score")
+        prior_score_value = (
+            float(prior_score)
+            if isinstance(prior_score, (int, float)) and not isinstance(prior_score, bool)
+            else None
+        )
+        keys: list[str] = []
+        if spread >= self.leadership_spread_threshold and leader_score > 0.0:
+            keys.append(f"global-leadership-spread:{leader}:{runner_up}")
+        if (
+            prior_leader
+            and prior_leader != leader
+            and leader_score >= self.leadership_change_threshold
+        ):
+            keys.append(f"global-leadership-rotation:{prior_leader}:{leader}")
+        if (
+            prior_leader == leader
+            and prior_score_value is not None
+            and leader_score - prior_score_value >= self.leadership_change_threshold
+        ):
+            keys.append(f"global-leadership-strengthened:{leader}")
+        return tuple(dict.fromkeys(keys))
 
     def scan_if_due(
         self,
@@ -181,18 +232,22 @@ class GlobalOpportunityMaterialCIOReassessmentEngine(
     ) -> ReassessmentResult:
         timestamp = aware_utc(now, "now")
         base = super().scan_if_due(now=timestamp, public_collection=public_collection)
-        if base.triggered or base.state in {
+        if base.state in {
             "not_due",
             "scheduled_guard",
             "failed",
             "market_closed",
-            "cooldown",
         }:
             return base
         state = load_json(self.state_path)
         leader, reasons, domain_scores = self._leadership_change(state=state)
         if leader is None:
             return base
+        opportunity_keys = self._leadership_opportunity_keys(
+            state=state,
+            leader=leader,
+            domain_scores=domain_scores,
+        )
         state["latest_global_opportunity_leader_domain"] = leader
         state["latest_global_opportunity_domain_scores"] = {
             key: round(value, 8) for key, value in sorted(domain_scores.items())
@@ -202,48 +257,47 @@ class GlobalOpportunityMaterialCIOReassessmentEngine(
             return base
 
         combined = tuple(dict.fromkeys((*base.reasons, *reasons)))
-        fingerprint = hashlib.sha256(
-            json.dumps(
-                {
-                    "revision": int(state.get("baseline_revision", 0) or 0),
-                    "leader": leader,
-                    "domain_scores": state["latest_global_opportunity_domain_scores"],
-                    "reasons": combined,
-                },
-                sort_keys=True,
-                separators=(",", ":"),
-            ).encode("utf-8")
-        ).hexdigest()
-        if state.get("last_trigger_fingerprint") == fingerprint:
+        if base.triggered and base.trigger_key is not None:
+            self._attach_opportunities_to_trigger(
+                state,
+                trigger_key=base.trigger_key,
+                opportunity_keys=opportunity_keys,
+                timestamp=timestamp,
+            )
+            save_json(self.state_path, state)
+            return ReassessmentResult(
+                state="triggered",
+                evaluated_at=timestamp,
+                triggered=True,
+                trigger_key=base.trigger_key,
+                reasons=combined,
+                symbol_count=base.symbol_count,
+                detail=(
+                    "Distinct market/public evidence and cross-market leadership "
+                    "changes request the same immediate canonical CIO reassessment."
+                ),
+            )
+
+        trigger_key, _ = self._claim_distinct_opportunities(
+            state,
+            opportunity_keys=opportunity_keys,
+            timestamp=timestamp,
+            prefix="global-opportunity",
+        )
+        if trigger_key is None:
             save_json(self.state_path, state)
             return ReassessmentResult(
                 state="deduplicated",
                 evaluated_at=timestamp,
                 reasons=combined,
                 symbol_count=base.symbol_count,
-                detail="The same cross-market leadership condition already requested CIO reassessment.",
+                detail=(
+                    "The same cross-market leadership condition already requested "
+                    "CIO reassessment; a different leadership opportunity remains "
+                    "immediately eligible."
+                ),
             )
-        last_triggered = parse_datetime(state.get("last_triggered_at"))
-        if last_triggered is not None and timestamp - last_triggered < self.event_cooldown:
-            save_json(self.state_path, state)
-            return ReassessmentResult(
-                state="cooldown",
-                evaluated_at=timestamp,
-                reasons=combined,
-                symbol_count=base.symbol_count,
-                detail="Global leadership changed inside the current CIO event cooldown.",
-            )
-        local = timestamp.astimezone(self.timezone)
-        trigger_key = (
-            f"global-opportunity-{local.strftime('%Y%m%d-%H%M')}-{fingerprint[:12]}"
-        )
-        state.update(
-            {
-                "last_triggered_at": timestamp.isoformat(),
-                "last_trigger_fingerprint": fingerprint,
-                "last_trigger_key": trigger_key,
-            }
-        )
+
         save_json(self.state_path, state)
         return ReassessmentResult(
             state="triggered",
@@ -253,8 +307,9 @@ class GlobalOpportunityMaterialCIOReassessmentEngine(
             reasons=combined,
             symbol_count=base.symbol_count,
             detail=(
-                "Cross-market relative leadership changed enough to request a full canonical CIO reassessment. "
-                "The trigger itself has no investment or execution authority."
+                "A distinct cross-market relative leadership change requests an "
+                "immediate full canonical CIO reassessment. The trigger itself has "
+                "no investment or execution authority."
             ),
         )
 
