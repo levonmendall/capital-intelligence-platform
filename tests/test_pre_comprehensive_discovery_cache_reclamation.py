@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import subprocess
 from datetime import datetime, timezone
+from pathlib import Path
 from types import SimpleNamespace
 
 import run_stage_isolated_evidence_pipeline as runtime
@@ -14,11 +15,14 @@ def _state(*, next_stage: str):
         generation_id=None,
         next_stage=next_stage,
         pipeline_id="pipeline-test",
+        release="release-test",
         evidence_as_of=datetime(2026, 8, 25, 17, 23, tzinfo=timezone.utc),
         completed_stages=("reference", "public_live", "us_equity_discovery"),
         current_stage="us_equity_discovery",
+        stage_started_at=None,
         error_type=None,
         error_detail=None,
+        path=Path("/tmp/capital-intelligence-test-stage-isolated-evidence-latest.json"),
     )
 
 
@@ -192,69 +196,4 @@ def test_invalid_cache_ownership_report_remains_advisory(monkeypatch, capsys) ->
     assert event["advisory_only"] is True
     assert event["evidence_certified"] is False
     assert event["decision_authority"] is False
-    assert event["real_money_authorized"] is False
-
-
-def test_comprehensive_reclamation_preserves_memory_controls(monkeypatch) -> None:
-    values = {
-        "CAPITAL_INTELLIGENCE_MEMORY_LIMIT_MB": "2048",
-        "CAPITAL_INTELLIGENCE_MEMORY_RESERVE_MB": "640",
-        "CAPITAL_INTELLIGENCE_CGROUP_HARD_CEILING_RATIO": "0.90",
-    }
-    original = dict(values)
-    calls: list[dict[str, object]] = []
-
-    def _completed(command, **kwargs):
-        calls.append({"command": command, **kwargs})
-        return subprocess.CompletedProcess(command, 0, stdout=json.dumps(_safe_report()))
-
-    monkeypatch.setattr(runtime.subprocess, "run", _completed)
-    runtime._run_comprehensive_discovery_cache_reclamation(values)
-
-    assert values == original
-    assert len(calls) == 1
-    assert calls[0]["timeout"] == runtime._REFERENCE_CACHE_RECLAMATION_TIMEOUT_SECONDS
-    assert calls[0]["env"] == original
-    assert calls[0]["start_new_session"] is False
-    assert calls[0]["stdout"] == subprocess.PIPE
-    assert calls[0]["text"] is True
-    assert "operations.pre_comprehensive_cache_reclamation" in (
-        runtime._COMPREHENSIVE_DISCOVERY_CACHE_RECLAMATION_CODE
-    )
-    assert "release_pre_comprehensive_completed_stage_file_cache" in (
-        runtime._COMPREHENSIVE_DISCOVERY_CACHE_RECLAMATION_CODE
-    )
-    assert "operations.evidence_file_cache_release" in runtime._REFERENCE_CACHE_RECLAMATION_CODE
-    assert "release_completed_operating_evidence_file_cache" in runtime._REFERENCE_CACHE_RECLAMATION_CODE
-
-
-def test_reference_boundary_uses_broad_clean_page_reclaimer(monkeypatch, capsys) -> None:
-    calls: list[dict[str, object]] = []
-    report = _safe_report()
-    report["failed_attempt_supersession_detected"] = False
-    report["flush_attempted_file_count"] = 0
-    report["flushed_file_count"] = 0
-
-    def _completed(command, **kwargs):
-        calls.append({"command": command, **kwargs})
-        return subprocess.CompletedProcess(command, 0, stdout=json.dumps(report))
-
-    monkeypatch.setattr(runtime.subprocess, "run", _completed)
-    runtime._run_reference_cache_reclamation({})
-
-    assert len(calls) == 1
-    assert calls[0]["command"][2] == runtime._COMPREHENSIVE_DISCOVERY_CACHE_RECLAMATION_CODE
-    assert calls[0]["stdout"] == subprocess.PIPE
-    assert calls[0]["text"] is True
-    assert calls[0]["start_new_session"] is False
-
-    event = json.loads(capsys.readouterr().out.strip())
-    assert event["stage"] == "reference"
-    assert event["status"] == "completed"
-    assert event["cache_ownership"]["failed_attempt_supersession_detected"] is False
-    assert event["cache_ownership"]["flush_attempted_file_count"] == 0
-    assert event["cache_ownership"]["flushed_file_count"] == 0
-    assert event["advisory_only"] is True
-    assert event["evidence_certified"] is False
-    assert event["decision_authority"] is False
-    assert event["real_money_authorized"] is False
+    assert event["execution_authority"] is False

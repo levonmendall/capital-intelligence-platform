@@ -26,6 +26,7 @@ from multiprocessing.connection import Connection
 from typing import Callable, Mapping, Sequence
 
 from operations import supervised_component_execution as _supervision
+from operations.comprehensive_descendant_reaper import process_start_ticks
 
 
 _NODE_TIMEOUT_ENV = "CAPITAL_INTELLIGENCE_CERTIFICATION_DAG_NODE_TIMEOUT_SECONDS"
@@ -47,6 +48,7 @@ class _RunningNode:
     connection: Connection
     process: multiprocessing.Process
     launched_at: float
+    process_start_ticks: int | None = None
     ready_at: float | None = None
     process_group_ready: bool = False
 
@@ -179,12 +181,14 @@ def _launch_node(
         except OSError:
             pass
         raise
+    pid = int(process.pid or 0)
     return _RunningNode(
         node=node,
         lease=lease,
         connection=parent_connection,
         process=process,
         launched_at=time.monotonic(),
+        process_start_ticks=process_start_ticks(pid) if pid > 1 else None,
     )
 
 
@@ -335,7 +339,7 @@ def _record_parent_progress(
 
 
 def _publish_runtime_journal(self, *, nodes, results, pending, running) -> None:
-    """Persist parent-owned lane state even if a child later hangs or is killed."""
+    """Persist parent-owned lane state and exact process identity for crash recovery."""
 
     from operations import persistent_certification_scheduler as scheduler
 
@@ -343,6 +347,7 @@ def _publish_runtime_journal(self, *, nodes, results, pending, running) -> None:
     running_ids = set(running)
     pending_ids = set(pending)
     for node in nodes:
+        active = running.get(node.node_id)
         result = results.get(node.node_id)
         if result is not None:
             state = result.status
@@ -367,6 +372,17 @@ def _publish_runtime_journal(self, *, nodes, results, pending, running) -> None:
             "decision_eligible_count": int(node.decision_eligible_count),
             "reused": reused,
             "failure_type": failure_type,
+            "pid": (
+                int(active.process.pid)
+                if active is not None and active.process.pid is not None
+                else None
+            ),
+            "process_start_ticks": (
+                active.process_start_ticks if active is not None else None
+            ),
+            "process_group_ready": (
+                bool(active.process_group_ready) if active is not None else False
+            ),
         }
 
     body: dict[str, object] = {

@@ -10,6 +10,12 @@ stage. A terminal failed attempt is archived and superseded by a fresh attempt s
 stage stores are revalidated rather than allowing a failed operational journal to authorize
 skipping work. No stage can be skipped, reordered, or treated as certified merely because
 the coordinator survived. Missing or failed work remains fail-closed.
+
+Comprehensive discovery additionally has an exact cross-process owner lease. The journal can
+say that a stage is active, but only the lease proves whether the owner is still alive. A
+second coordinator therefore observes a live owner without restarting or expiring it. Once
+ownership is available, stale independently-sessioned DAG descendants are reaped by exact
+PID/start-time identity before any restart/freshness decision.
 """
 
 from __future__ import annotations
@@ -22,6 +28,9 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Mapping, Sequence
 
+from operations.comprehensive_descendant_reaper import (
+    reap_stale_comprehensive_descendants,
+)
 from operations.stage_isolated_evidence_pipeline import (
     _STAGES,
     _max_age_seconds,
@@ -31,6 +40,7 @@ from operations.stage_isolated_evidence_pipeline import (
     fail_evidence_stage,
     load_stage_isolated_evidence_state,
 )
+from operations.stage_owner_lease import StageOwnerLease, try_acquire_stage_owner
 
 
 _FAILURE_EVENT = "continuous_evidence_plane_failure_context"
@@ -43,8 +53,10 @@ _FAILED_ATTEMPT_CACHE_RECLAMATION_EVENT = "stage_isolated_failed_attempt_cache_r
 _REFERENCE_CACHE_RECLAMATION_TIMEOUT_SECONDS = 10.0
 _STAGE_TERMINATION_GRACE_SECONDS = 5.0
 _STAGE_FRESHNESS_EXPIRED_RETURN_CODE = 124
+_STAGE_ACTIVE_OWNER_RETURN_CODE = 75
 _STAGE_FRESHNESS_ERROR_TYPE = "EvidenceFreshnessExpired"
 _STAGE_WRAPPER_INTERNAL_ERROR_RETURN_CODE = 2
+_COMPREHENSIVE_STAGE = "comprehensive_discovery"
 _COMPREHENSIVE_DISCOVERY_RESTART_RESERVE_SECONDS = 480.0
 _PRECOMPREHENSIVE_CACHE_RECLAMATION_SCHEMA = "pre-comprehensive-cache-reclamation.v1"
 _REFERENCE_CACHE_RECLAMATION_CODE = """
@@ -95,6 +107,90 @@ def _safe_failure(
         ),
         file=sys.stderr,
         flush=True,
+    )
+
+
+def _emit_active_stage_owner(state: StageIsolatedEvidenceState) -> None:
+    """Publish a retryable observation without modifying the active stage journal."""
+
+    print(
+        json.dumps(
+            {
+                "event": "stage_isolated_evidence_stage_owner_active",
+                "pipeline_id": state.pipeline_id,
+                "stage": _COMPREHENSIVE_STAGE,
+                "evidence_as_of": state.evidence_as_of.isoformat(),
+                "stage_started_at": (
+                    None
+                    if state.stage_started_at is None
+                    else state.stage_started_at.isoformat()
+                ),
+                "retry_deferred": True,
+                "journal_modified": False,
+                "decision_authority": False,
+                "candidate_authority": False,
+                "sizing_authority": False,
+                "construction_authority": False,
+                "execution_authority": False,
+                "paper_only": True,
+                "real_money_authorized": False,
+            },
+            sort_keys=True,
+        ),
+        flush=True,
+    )
+
+
+def _reap_comprehensive_descendants(
+    values: Mapping[str, str],
+    state: StageIsolatedEvidenceState,
+) -> None:
+    """Best-effort exact-identity cleanup before restart/failure reconciliation."""
+
+    try:
+        report = reap_stale_comprehensive_descendants(
+            values,
+            evidence_as_of=state.evidence_as_of,
+            release=state.release,
+        )
+    except (OSError, RuntimeError, TypeError, ValueError):
+        report = {
+            "attempted": False,
+            "runtime_journal_found": False,
+            "running_nodes_recorded": 0,
+            "identity_matched": 0,
+            "reaped": 0,
+            "identity_mismatch_or_gone": 0,
+            "credential_safe": True,
+            "decision_authority": False,
+            "candidate_authority": False,
+            "sizing_authority": False,
+            "construction_authority": False,
+            "execution_authority": False,
+            "paper_only": True,
+            "real_money_authorized": False,
+        }
+    print(
+        json.dumps(
+            {
+                "event": "stage_isolated_comprehensive_descendants_reaped",
+                "pipeline_id": state.pipeline_id,
+                "evidence_as_of": state.evidence_as_of.isoformat(),
+                **report,
+            },
+            sort_keys=True,
+        ),
+        flush=True,
+    )
+
+
+def _acquire_comprehensive_owner(
+    state: StageIsolatedEvidenceState,
+) -> StageOwnerLease | None:
+    return try_acquire_stage_owner(
+        state.path,
+        pipeline_id=state.pipeline_id,
+        stage=_COMPREHENSIVE_STAGE,
     )
 
 
@@ -471,6 +567,29 @@ def _ensure_active_attempt(values: Mapping[str, str]) -> StageIsolatedEvidenceSt
     return replacement
 
 
+def _failed_comprehensive_owner_is_live(
+    values: Mapping[str, str],
+) -> bool:
+    """Refuse failed-attempt supersession while its comprehensive owner still holds lease."""
+
+    existing = load_stage_isolated_evidence_state(values)
+    if (
+        existing is None
+        or existing.state != "failed"
+        or existing.current_stage != _COMPREHENSIVE_STAGE
+    ):
+        return False
+    lease = _acquire_comprehensive_owner(existing)
+    if lease is None:
+        _emit_active_stage_owner(existing)
+        return True
+    try:
+        _reap_comprehensive_descendants(values, existing)
+    finally:
+        lease.release()
+    return False
+
+
 def run_pipeline(values: Mapping[str, str] | None = None) -> int:
     resolved = dict(os.environ if values is None else values)
     if str(resolved.get("RENDER") or "").strip().lower() == "true":
@@ -479,6 +598,9 @@ def run_pipeline(values: Mapping[str, str] | None = None) -> int:
         # serially so nested interpreters cannot recreate a parallel memory spike.
         resolved[_DAG_WORKERS_ENV] = "1"
         os.environ[_DAG_WORKERS_ENV] = "1"
+
+    if _failed_comprehensive_owner_is_live(resolved):
+        return _STAGE_ACTIVE_OWNER_RETURN_CODE
 
     state = _ensure_active_attempt(resolved)
     if state.state == "completed" and state.generation_id:
@@ -528,18 +650,156 @@ def run_pipeline(values: Mapping[str, str] | None = None) -> int:
         if stage is None:
             raise RuntimeError("stage-isolated evidence pipeline has no runnable next stage")
 
-        # A comprehensive child that already exited without completing its durable stage
-        # may be retried by a later coordinator invocation. Do not relaunch that same heavy
-        # stage once the unchanged evidence epoch can no longer preserve the existing
-        # 480-second downstream reserve. Mark the attempt failed before cache reclamation
-        # or process spawn so the normal supersession path obtains a genuinely fresh epoch.
-        if stage == "comprehensive_discovery" and state.current_stage == stage:
-            remaining = _remaining_evidence_lifetime_seconds(state, resolved)
-            if remaining <= _COMPREHENSIVE_DISCOVERY_RESTART_RESERVE_SECONDS:
-                detail = _comprehensive_restart_freshness_detail(
+        stage_owner: StageOwnerLease | None = None
+        if stage == _COMPREHENSIVE_STAGE:
+            stage_owner = _acquire_comprehensive_owner(state)
+            if stage_owner is None:
+                _emit_active_stage_owner(state)
+                return _STAGE_ACTIVE_OWNER_RETURN_CODE
+
+        try:
+            # A comprehensive child that already exited without completing its durable
+            # stage may be retried by a later coordinator invocation. The owner lease proves
+            # that no live coordinator still owns it. Reap any exact independently-sessioned
+            # DAG descendants before deciding whether the unchanged epoch has enough time to
+            # restart while preserving the existing 480-second downstream reserve.
+            if stage == _COMPREHENSIVE_STAGE and state.current_stage == stage:
+                _reap_comprehensive_descendants(resolved, state)
+                remaining = _remaining_evidence_lifetime_seconds(state, resolved)
+                if remaining <= _COMPREHENSIVE_DISCOVERY_RESTART_RESERVE_SECONDS:
+                    detail = _comprehensive_restart_freshness_detail(
+                        state,
+                        resolved,
+                        remaining_seconds=remaining,
+                    )
+                    latest = fail_evidence_stage(
+                        resolved,
+                        pipeline_id=state.pipeline_id,
+                        stage=stage,
+                        error_type=_STAGE_FRESHNESS_ERROR_TYPE,
+                        error_detail=detail,
+                    )
+                    _safe_failure(
+                        pipeline_id=state.pipeline_id,
+                        stage=stage,
+                        return_code=_STAGE_FRESHNESS_EXPIRED_RETURN_CODE,
+                        error_type=latest.error_type,
+                        error_detail=latest.error_detail,
+                    )
+                    return _STAGE_FRESHNESS_EXPIRED_RETURN_CODE
+
+            # The parent must own the reference-stage handoff before it spawns the fresh child.
+            # Otherwise a child that stalls during interpreter/import startup leaves the outer
+            # prequalification watchdog observing only the previous public-live boundary. The
+            # child still calls begin_evidence_stage itself; that repeat write is deliberately
+            # harmless and immediately yields to the finer reference progress journal.
+            if stage == "reference" and state.current_stage != "reference":
+                state = begin_evidence_stage(
+                    resolved,
+                    pipeline_id=state.pipeline_id,
+                    stage=stage,
+                )
+
+            # Release clean pages at the heavyweight stage boundaries where production
+            # telemetry has shown persistent raw cgroup pressure. Each boundary uses the same
+            # bounded data-root scan and clean-page advice before the fresh stage interpreter is
+            # spawned. Failed-attempt dirty-page flushing remains separately restricted to the
+            # supersession boundary. Neither path changes an evidence or memory threshold.
+            if stage == "reference":
+                _run_reference_cache_reclamation(resolved)
+            elif stage == "public_live":
+                _run_completed_evidence_cache_reclamation(
+                    resolved,
+                    stage="public_live",
+                    event="stage_isolated_public_live_cache_reclamation",
+                    code=_COMPREHENSIVE_DISCOVERY_CACHE_RECLAMATION_CODE,
+                    capture_report=True,
+                )
+            elif stage == _COMPREHENSIVE_STAGE:
+                _run_comprehensive_discovery_cache_reclamation(resolved)
+
+            print(
+                json.dumps(
+                    {
+                        "event": "stage_isolated_evidence_stage_starting",
+                        "pipeline_id": state.pipeline_id,
+                        "stage": stage,
+                        "evidence_as_of": state.evidence_as_of.isoformat(),
+                        "completed_stages": list(state.completed_stages),
+                        "fresh_interpreter": True,
+                        "exclusive_heavy_memory_lane_inherited": True,
+                        "exact_stage_owner_lease": stage == _COMPREHENSIVE_STAGE,
+                        "paper_only": True,
+                        "real_money_authorized": False,
+                    },
+                    sort_keys=True,
+                ),
+                flush=True,
+            )
+            process = subprocess.Popen(
+                (
+                    sys.executable,
+                    str(script),
+                    stage,
+                    "--pipeline-id",
+                    state.pipeline_id,
+                ),
+                env=resolved,
+                cwd=str(script.parent),
+                # Keep every stage in the coordinator's process group. The outer reclaimable
+                # memory governor can therefore terminate the complete ordinary stage tree.
+                # Comprehensive DAG nodes may create their own sessions, and their exact
+                # identities are persisted/reaped separately by the owner contract above.
+                start_new_session=False,
+            )
+            return_code, freshness_expired = _wait_for_stage_process(
+                process,
+                state=state,
+                values=resolved,
+            )
+            latest = load_stage_isolated_evidence_state(resolved)
+
+            # If comprehensive did not finish cleanly, its stage process may have died before
+            # its DAG supervisor could clear separately-sessioned node groups. Reap only exact
+            # persisted PID/start-time identities while this coordinator still holds the owner
+            # lease, so no later attempt can overlap them.
+            if stage == _COMPREHENSIVE_STAGE and (freshness_expired or return_code != 0):
+                _reap_comprehensive_descendants(resolved, state)
+
+            if freshness_expired:
+                # Reload after the stale child and descendants have been reaped. A child can
+                # commit terminal truth between timeout and liveness re-check; never overwrite
+                # that newer durable evidence with a supervisor timeout classification.
+                latest = load_stage_isolated_evidence_state(resolved)
+                if latest is not None and latest.pipeline_id == state.pipeline_id:
+                    if stage in latest.completed_stages:
+                        continue
+                    if latest.state == "failed" and latest.current_stage == stage:
+                        _safe_failure(
+                            pipeline_id=state.pipeline_id,
+                            stage=stage,
+                            return_code=(return_code if return_code != 0 else 2),
+                            error_type=latest.error_type,
+                            error_detail=latest.error_detail,
+                        )
+                        return return_code if return_code != 0 else 2
+                if latest is None or latest.pipeline_id != state.pipeline_id:
+                    _safe_failure(
+                        pipeline_id=state.pipeline_id,
+                        stage=stage,
+                        return_code=2,
+                        error_type="StageCheckpointError",
+                        error_detail=(
+                            "stage evidence identity changed while enforcing freshness deadline"
+                        ),
+                    )
+                    return 2
+
+                detail = _freshness_expired_detail(
                     state,
                     resolved,
-                    remaining_seconds=remaining,
+                    stage=stage,
+                    child_return_code=return_code,
                 )
                 latest = fail_evidence_stage(
                     resolved,
@@ -557,161 +817,46 @@ def run_pipeline(values: Mapping[str, str] | None = None) -> int:
                 )
                 return _STAGE_FRESHNESS_EXPIRED_RETURN_CODE
 
-        # The parent must own the reference-stage handoff before it spawns the fresh child.
-        # Otherwise a child that stalls during interpreter/import startup leaves the outer
-        # prequalification watchdog observing only the previous public-live boundary. The
-        # child still calls begin_evidence_stage itself; that repeat write is deliberately
-        # harmless and immediately yields to the finer reference progress journal.
-        if stage == "reference" and state.current_stage != "reference":
-            state = begin_evidence_stage(
-                resolved,
-                pipeline_id=state.pipeline_id,
-                stage=stage,
-            )
-
-        # Release clean pages at the heavyweight stage boundaries where production
-        # telemetry has shown persistent raw cgroup pressure. Each boundary uses the same
-        # bounded data-root scan and clean-page advice before the fresh stage interpreter is
-        # spawned. Failed-attempt dirty-page flushing remains separately restricted to the
-        # supersession boundary. Neither path changes an evidence or memory threshold.
-        if stage == "reference":
-            _run_reference_cache_reclamation(resolved)
-        elif stage == "public_live":
-            _run_completed_evidence_cache_reclamation(
-                resolved,
-                stage="public_live",
-                event="stage_isolated_public_live_cache_reclamation",
-                code=_COMPREHENSIVE_DISCOVERY_CACHE_RECLAMATION_CODE,
-                capture_report=True,
-            )
-        elif stage == "comprehensive_discovery":
-            _run_comprehensive_discovery_cache_reclamation(resolved)
-
-        print(
-            json.dumps(
-                {
-                    "event": "stage_isolated_evidence_stage_starting",
-                    "pipeline_id": state.pipeline_id,
-                    "stage": stage,
-                    "evidence_as_of": state.evidence_as_of.isoformat(),
-                    "completed_stages": list(state.completed_stages),
-                    "fresh_interpreter": True,
-                    "exclusive_heavy_memory_lane_inherited": True,
-                    "paper_only": True,
-                    "real_money_authorized": False,
-                },
-                sort_keys=True,
-            ),
-            flush=True,
-        )
-        process = subprocess.Popen(
-            (
-                sys.executable,
-                str(script),
-                stage,
-                "--pipeline-id",
-                state.pipeline_id,
-            ),
-            env=resolved,
-            cwd=str(script.parent),
-            # Keep every stage in the coordinator's process group. The outer reclaimable
-            # memory governor can therefore terminate the entire active stage tree safely.
-            start_new_session=False,
-        )
-        return_code, freshness_expired = _wait_for_stage_process(
-            process,
-            state=state,
-            values=resolved,
-        )
-        latest = load_stage_isolated_evidence_state(resolved)
-
-        if freshness_expired:
-            # Reload after the stale child has been reaped. A child can commit terminal
-            # truth between the timeout and liveness re-check; never overwrite that newer
-            # durable evidence with a supervisor timeout classification.
-            if latest is not None and latest.pipeline_id == state.pipeline_id:
-                if stage in latest.completed_stages:
-                    continue
-                if latest.state == "failed" and latest.current_stage == stage:
-                    _safe_failure(
+            if return_code != 0:
+                # Only the wrapper's known generic internal-error exit may be reconciled after
+                # exact durable completion. All other positive exits, signals, identity changes,
+                # failed journals, and every pre-completion exit remain fail-closed.
+                if _durably_completed_stage_exit(
+                    latest,
+                    pipeline_id=state.pipeline_id,
+                    stage=stage,
+                    return_code=return_code,
+                ):
+                    _emit_stage_exit_reconciled(
                         pipeline_id=state.pipeline_id,
                         stage=stage,
-                        return_code=(return_code if return_code != 0 else 2),
-                        error_type=latest.error_type,
-                        error_detail=latest.error_detail,
+                        return_code=return_code,
                     )
-                    return return_code if return_code != 0 else 2
-            if latest is None or latest.pipeline_id != state.pipeline_id:
+                    continue
+                _safe_failure(
+                    pipeline_id=state.pipeline_id,
+                    stage=stage,
+                    return_code=return_code,
+                    error_type=None if latest is None else latest.error_type,
+                    error_detail=None if latest is None else latest.error_detail,
+                )
+                return return_code
+            if (
+                latest is None
+                or latest.pipeline_id != state.pipeline_id
+                or stage not in latest.completed_stages
+            ):
                 _safe_failure(
                     pipeline_id=state.pipeline_id,
                     stage=stage,
                     return_code=2,
                     error_type="StageCheckpointError",
-                    error_detail=(
-                        "stage evidence identity changed while enforcing freshness deadline"
-                    ),
+                    error_detail="stage process exited successfully without durable stage completion",
                 )
                 return 2
-
-            detail = _freshness_expired_detail(
-                state,
-                resolved,
-                stage=stage,
-                child_return_code=return_code,
-            )
-            latest = fail_evidence_stage(
-                resolved,
-                pipeline_id=state.pipeline_id,
-                stage=stage,
-                error_type=_STAGE_FRESHNESS_ERROR_TYPE,
-                error_detail=detail,
-            )
-            _safe_failure(
-                pipeline_id=state.pipeline_id,
-                stage=stage,
-                return_code=_STAGE_FRESHNESS_EXPIRED_RETURN_CODE,
-                error_type=latest.error_type,
-                error_detail=latest.error_detail,
-            )
-            return _STAGE_FRESHNESS_EXPIRED_RETURN_CODE
-
-        if return_code != 0:
-            # Only the wrapper's known generic internal-error exit may be reconciled after
-            # exact durable completion. All other positive exits, signals, identity changes,
-            # failed journals, and every pre-completion exit remain fail-closed.
-            if _durably_completed_stage_exit(
-                latest,
-                pipeline_id=state.pipeline_id,
-                stage=stage,
-                return_code=return_code,
-            ):
-                _emit_stage_exit_reconciled(
-                    pipeline_id=state.pipeline_id,
-                    stage=stage,
-                    return_code=return_code,
-                )
-                continue
-            _safe_failure(
-                pipeline_id=state.pipeline_id,
-                stage=stage,
-                return_code=return_code,
-                error_type=None if latest is None else latest.error_type,
-                error_detail=None if latest is None else latest.error_detail,
-            )
-            return return_code
-        if (
-            latest is None
-            or latest.pipeline_id != state.pipeline_id
-            or stage not in latest.completed_stages
-        ):
-            _safe_failure(
-                pipeline_id=state.pipeline_id,
-                stage=stage,
-                return_code=2,
-                error_type="StageCheckpointError",
-                error_detail="stage process exited successfully without durable stage completion",
-            )
-            return 2
+        finally:
+            if stage_owner is not None:
+                stage_owner.release()
 
 
 def main(argv: Sequence[str] | None = None) -> int:
