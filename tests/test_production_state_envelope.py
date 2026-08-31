@@ -76,6 +76,7 @@ def test_envelope_aligns_diagnostic_lane_state_and_certification_on_one_release(
             "real_money_authorized": False,
         },
     )
+    monkeypatch.setattr(state, "load_release_production_state", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(state, "latest_manual_cio_diagnostic", lambda **_kwargs: _diagnostic())
 
     envelope = state.load_production_state_envelope(
@@ -101,6 +102,36 @@ def test_envelope_aligns_diagnostic_lane_state_and_certification_on_one_release(
     assert envelope["execution_authority"] is False
 
 
+def test_exact_release_pointer_wins_even_after_global_coordination_advances(monkeypatch):
+    exact = _diagnostic()
+    stale = _diagnostic("render-release:next-release")
+    monkeypatch.setattr(state, "load_current_asset_class_evaluation_status", lambda **_kwargs: _current())
+    monkeypatch.setattr(state, "load_latest_completed_asset_class_evaluation", lambda **_kwargs: None)
+    monkeypatch.setattr(state, "load_public_lane_telemetry", lambda _values: None)
+    monkeypatch.setattr(
+        state,
+        "load_all_market_certification_envelope",
+        lambda **_kwargs: {"release_sha": _RELEASE, "certified": False},
+    )
+    monkeypatch.setattr(
+        state,
+        "load_release_production_state",
+        lambda release, **_kwargs: exact if release == _RELEASE else None,
+    )
+    monkeypatch.setattr(state, "latest_manual_cio_diagnostic", lambda **_kwargs: stale)
+
+    envelope = state.load_production_state_envelope(
+        values={"CAPITAL_INTELLIGENCE_RELEASE": _RELEASE},
+        now=_NOW,
+    )
+
+    assert envelope["production"]["state"] == "in_progress"
+    assert envelope["production"]["stage"] == "production_context_screening_graph_released"
+    assert envelope["production"]["request_id"] == "diag-1"
+    assert envelope["production"]["release_matches"] is True
+    assert envelope["alignment"]["diagnostic_release_matches"] is True
+
+
 def test_stale_diagnostic_is_never_presented_as_current_release(monkeypatch):
     monkeypatch.setattr(state, "load_current_asset_class_evaluation_status", lambda **_kwargs: _current())
     monkeypatch.setattr(state, "load_latest_completed_asset_class_evaluation", lambda **_kwargs: None)
@@ -110,6 +141,7 @@ def test_stale_diagnostic_is_never_presented_as_current_release(monkeypatch):
         "load_all_market_certification_envelope",
         lambda **_kwargs: {"release_sha": _RELEASE, "certified": False},
     )
+    monkeypatch.setattr(state, "load_release_production_state", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
         state,
         "latest_manual_cio_diagnostic",
@@ -144,6 +176,7 @@ def test_cross_epoch_lane_telemetry_is_reported_incoherent(monkeypatch):
         "load_all_market_certification_envelope",
         lambda **_kwargs: {"release_sha": _RELEASE, "certified": False},
     )
+    monkeypatch.setattr(state, "load_release_production_state", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(state, "latest_manual_cio_diagnostic", lambda **_kwargs: _diagnostic())
 
     envelope = state.load_production_state_envelope(
