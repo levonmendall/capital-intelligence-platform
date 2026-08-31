@@ -2,16 +2,16 @@
 
 The canonical transactional lane is deliberately reuse-only: it may consume an exact-epoch
 provider publication produced by the early acquisition owner but may not start a second late
-network fallback.  A single transient early provider-child failure therefore used to leave a
-valid structural cache with no reusable publication, making the later lane fail immediately.
+network fallback. A transient early structure or provider-child failure can therefore leave
+no reusable publication, making the later canonical lane fail immediately.
 
 This wrapper gives the existing early owner a bounded retry opportunity without changing its
-resource contract.  All passes share the *original* fanout budget calculated at sidecar
-start; each later pass is capped to the remaining portion of that same budget.  Existing
-clean publications are reused, so retry passes spend provider time only on prerequisites that
-remain absent.  The six-worker cap, 300-second acceleration ceiling, downstream reserve,
-evidence freshness, market scope, screening, CIO authority, construction, paper-only
-execution, and real-money prohibition remain unchanged.
+resource contract. All passes share the *original* fanout budget calculated at sidecar
+start; each later pass is capped to the remaining portion of that same budget. Existing
+clean structures and publications are reused, so retry passes spend expensive work only on
+prerequisites that remain absent. The six-worker cap, 300-second acceleration ceiling,
+downstream reserve, evidence freshness, market scope, screening, CIO authority,
+construction, paper-only execution, and real-money prohibition remain unchanged.
 """
 
 from __future__ import annotations
@@ -29,12 +29,18 @@ from operations import epoch_scoped_provider_acquisition as _acquisition
 _MODULE = "operations.resilient_comprehensive_discovery_prewarm"
 _MAX_PROVIDER_PASSES = 3
 _INSTALLED_ATTR = "_resilient_comprehensive_provider_prewarm_installed"
+_RETRY_COUNTERS = (
+    "failed",
+    "provider_skipped_budget",
+    "structural_prewarm_failed",
+    "structural_prewarm_skipped_budget",
+)
 
 
 def _needs_retry(report: Mapping[str, object]) -> bool:
-    return int(report.get("failed", 0) or 0) > 0 or int(
-        report.get("provider_skipped_budget", 0) or 0
-    ) > 0
+    """Retry whenever a scheduled lane can still be missing an early publication prerequisite."""
+
+    return any(int(report.get(name, 0) or 0) > 0 for name in _RETRY_COUNTERS)
 
 
 def _run_resilient_fanout(
@@ -114,7 +120,7 @@ def prewarm_epoch_provider_inputs(
     evidence_as_of: datetime,
     values: Mapping[str, str] | None = None,
 ) -> Mapping[str, object]:
-    """Run the canonical prewarm with resilient provider retries inside its original budget."""
+    """Run the canonical prewarm with resilient prerequisite retries inside its original budget."""
 
     original = _acquisition.run_provider_acquisition_fanout
 
