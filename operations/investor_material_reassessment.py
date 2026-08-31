@@ -1,10 +1,13 @@
 """Investor-grade material reassessment on top of the live market scanner.
 
-The existing scanner remains authoritative for price, market-hours, schedule guards,
-deduplication, and cooldown. This extension adds content-aware public-evidence
-materiality so credit, rates, inflation, currency, volatility, positioning, earnings,
-policy, geopolitical, operational, and counterparty changes can request a canonical
-CIO reassessment before or without a large price move.
+The existing scanner remains authoritative for price and market-hours handling. This
+extension adds content-aware public-evidence materiality so credit, rates, inflation,
+currency, volatility, positioning, earnings, policy, geopolitical, operational, and
+counterparty changes can request a canonical CIO reassessment before or without a
+large price move.
+
+Deduplication is opportunity-specific. A recently reviewed market event cannot delay a
+different qualified public-evidence opportunity.
 
 The scanner requests review only. It has no candidate, CIO-action, sizing,
 construction, execution, policy-change, or real-money authority.
@@ -221,8 +224,15 @@ class InvestorMaterialCIOReassessmentEngine(
                 )
             )
         )[-_ACKNOWLEDGED_LIMIT:]
+        opportunity_keys = tuple(f"public-record:{item}" for item in identifiers)
 
         if base.triggered and base.trigger_key is not None:
+            self._attach_opportunities_to_trigger(
+                state,
+                trigger_key=base.trigger_key,
+                opportunity_keys=opportunity_keys,
+                timestamp=timestamp,
+            )
             state["last_trigger_public_record_identifiers"] = list(identifiers)
             save_json(self.state_path, state)
             return ReassessmentResult(
@@ -233,23 +243,18 @@ class InvestorMaterialCIOReassessmentEngine(
                 reasons=combined_reasons,
                 symbol_count=base.symbol_count,
                 detail=(
-                    "Material market movement and new content-level public evidence "
-                    "request a full canonical CIO reassessment."
+                    "Material market movement and distinct content-level public "
+                    "evidence request a full canonical CIO reassessment."
                 ),
             )
 
-        fingerprint = hashlib.sha256(
-            json.dumps(
-                {
-                    "revision": int(state.get("baseline_revision", 0) or 0),
-                    "public_record_identifiers": identifiers,
-                    "reasons": combined_reasons,
-                },
-                sort_keys=True,
-                separators=(",", ":"),
-            ).encode("utf-8")
-        ).hexdigest()
-        if state.get("last_trigger_fingerprint") == fingerprint:
+        trigger_key, claimed = self._claim_distinct_opportunities(
+            state,
+            opportunity_keys=opportunity_keys,
+            timestamp=timestamp,
+            prefix="material-evidence",
+        )
+        if trigger_key is None:
             save_json(self.state_path, state)
             return ReassessmentResult(
                 state="deduplicated",
@@ -257,40 +262,16 @@ class InvestorMaterialCIOReassessmentEngine(
                 reasons=combined_reasons,
                 symbol_count=base.symbol_count,
                 detail=(
-                    "The same material public-evidence condition already requested "
-                    "a CIO reassessment."
-                ),
-            )
-        last_triggered = parse_datetime(state.get("last_triggered_at"))
-        if (
-            last_triggered is not None
-            and timestamp - last_triggered < self.event_cooldown
-        ):
-            save_json(self.state_path, state)
-            return ReassessmentResult(
-                state="cooldown",
-                evaluated_at=timestamp,
-                reasons=combined_reasons,
-                symbol_count=base.symbol_count,
-                detail=(
-                    "New material public evidence is retained for reassessment after "
-                    "the current event-review cooldown."
+                    "The same material public-evidence records already requested a "
+                    "CIO reassessment; unrelated records remain independently eligible."
                 ),
             )
 
-        local = timestamp.astimezone(self.timezone)
-        trigger_key = (
-            f"material-evidence-{local.strftime('%Y%m%d-%H%M')}-"
-            f"{fingerprint[:12]}"
-        )
-        state.update(
-            {
-                "last_triggered_at": timestamp.isoformat(),
-                "last_trigger_fingerprint": fingerprint,
-                "last_trigger_key": trigger_key,
-                "last_trigger_public_record_identifiers": list(identifiers),
-            }
-        )
+        state["last_trigger_public_record_identifiers"] = [
+            item
+            for item in identifiers
+            if f"public-record:{item}" in set(claimed)
+        ]
         save_json(self.state_path, state)
         return ReassessmentResult(
             state="triggered",
@@ -300,9 +281,10 @@ class InvestorMaterialCIOReassessmentEngine(
             reasons=combined_reasons,
             symbol_count=base.symbol_count,
             detail=(
-                "New material growth, inflation, policy, liquidity, rates, earnings, "
-                "credit, currency, volatility, positioning, or thesis-relevant public "
-                "evidence requests a canonical CIO reassessment."
+                "Distinct material growth, inflation, policy, liquidity, rates, "
+                "earnings, credit, currency, volatility, positioning, or "
+                "thesis-relevant public evidence requests an immediate canonical "
+                "CIO reassessment."
             ),
         )
 
