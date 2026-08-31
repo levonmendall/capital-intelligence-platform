@@ -9,6 +9,13 @@ independent limits:
 * a higher raw-cgroup hard ceiling that still leaves explicit service headroom before the
   platform's absolute memory limit.
 
+Cgroup-v2 accounting is resolved for the current process from ``/proc/self/cgroup`` and
+``/proc/self/mountinfo``. This matters on managed runtimes that place the process in a nested
+cgroup: reading the cgroup mount root can include memory owned by sibling workloads and can
+also make ``memory.reclaim`` appear unavailable even when it exists for the process cgroup.
+If process-cgroup resolution is unavailable or malformed, the guard falls back to the
+historical root paths and remains fail-closed.
+
 A raw-only hard-ceiling crossing gets a tightly bounded cgroup-v2 reclaim/re-measure sequence
 before the child is terminated. The guard remeasures the exact same boundaries after every
 attempt and remains fail-closed: working-set pressure, unavailable reclaim, reclaim errors,
@@ -25,11 +32,12 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import signal
 import subprocess
 import time
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from threading import Event, Thread
 from typing import Mapping
 
@@ -42,7 +50,20 @@ _RECLAIM_MAX_KIB = 256 * 1024
 # Keep raw-only recovery synchronous and small: at most three 256 MiB requests, or 768 MiB
 # requested in total, before fail-closed termination.
 _RAW_RECLAIM_MAX_ATTEMPTS = 3
-_CGROUP_V2_RECLAIM_PATH = Path("/sys/fs/cgroup/memory.reclaim")
+# Production wrapper uses this only to decide whether an otherwise ineffective raw reclaim
+# should fall through to one bounded clean-file advisory pass.
+_RAW_RECLAIM_MIN_PROGRESS_KIB = 4 * 1024
+
+_CGROUP_V2_ROOT = Path("/sys/fs/cgroup")
+_CGROUP_V2_CURRENT_PATH = _CGROUP_V2_ROOT / "memory.current"
+_CGROUP_V2_MAX_PATH = _CGROUP_V2_ROOT / "memory.max"
+_CGROUP_V2_EVENTS_PATH = _CGROUP_V2_ROOT / "memory.events"
+_CGROUP_V2_STAT_PATH = _CGROUP_V2_ROOT / "memory.stat"
+_CGROUP_V2_RECLAIM_PATH = _CGROUP_V2_ROOT / "memory.reclaim"
+_PROC_SELF_CGROUP_PATH = Path("/proc/self/cgroup")
+_PROC_SELF_MOUNTINFO_PATH = Path("/proc/self/mountinfo")
+_MOUNTINFO_ESCAPE = re.compile(r"\\([0-7]{3})")
+
 _HARD_FRACTION_ENV = "CAPITAL_INTELLIGENCE_RENDER_MEMORY_HARD_WATER_FRACTION"
 _HARD_RESERVE_ENV = "CAPITAL_INTELLIGENCE_RENDER_MEMORY_HARD_RESERVE_MB"
 _CONFIGURED_LIMIT_ENV = "CAPITAL_INTELLIGENCE_CONTAINER_MEMORY_LIMIT_MB"
@@ -82,6 +103,16 @@ class MemoryReclaimResult:
     error_type: str | None
 
 
+@dataclass(frozen=True, slots=True)
+class _CgroupV2Paths:
+    current: Path
+    maximum: Path
+    events: Path
+    stat: Path
+    reclaim: Path
+    process_scoped: bool
+
+
 def _read_int(path: Path) -> int | None:
     try:
         raw = path.read_text(encoding="utf-8").strip()
@@ -113,6 +144,94 @@ def _read_key_values(path: Path) -> dict[str, int]:
         if value >= 0:
             parsed[parts[0]] = value
     return parsed
+
+
+def _decode_mountinfo_path(value: str) -> str:
+    return _MOUNTINFO_ESCAPE.sub(lambda match: chr(int(match.group(1), 8)), value)
+
+
+def _process_cgroup_v2_path(path: Path = _PROC_SELF_CGROUP_PATH) -> PurePosixPath | None:
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeError):
+        return None
+    for line in lines:
+        parts = line.split(":", 2)
+        if len(parts) != 3 or parts[0] != "0" or parts[1] != "":
+            continue
+        candidate = PurePosixPath(parts[2] or "/")
+        return candidate if candidate.is_absolute() else None
+    return None
+
+
+def _resolve_process_cgroup_v2_directory(
+    *,
+    cgroup_path: Path = _PROC_SELF_CGROUP_PATH,
+    mountinfo_path: Path = _PROC_SELF_MOUNTINFO_PATH,
+) -> Path | None:
+    """Resolve the current process's unified cgroup-v2 directory.
+
+    A successful resolution is authoritative for this process. Callers must not climb to
+    the parent/root cgroup if a process-scoped file is absent, because that could measure or
+    reclaim memory belonging to sibling workloads.
+    """
+
+    process_path = _process_cgroup_v2_path(cgroup_path)
+    if process_path is None:
+        return None
+    try:
+        lines = mountinfo_path.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeError):
+        return None
+
+    for line in lines:
+        before, separator, after = line.partition(" - ")
+        if not separator:
+            continue
+        post_fields = after.split()
+        pre_fields = before.split()
+        if len(post_fields) < 1 or post_fields[0] != "cgroup2" or len(pre_fields) < 5:
+            continue
+        mount_root = PurePosixPath(_decode_mountinfo_path(pre_fields[3]))
+        mount_point_text = _decode_mountinfo_path(pre_fields[4])
+        mount_point = Path(mount_point_text)
+        if not mount_root.is_absolute() or not mount_point.is_absolute():
+            continue
+        try:
+            relative = process_path.relative_to(mount_root)
+        except ValueError:
+            continue
+        parts = tuple(part for part in relative.parts if part not in ("", "."))
+        return mount_point.joinpath(*parts)
+    return None
+
+
+def _cgroup_v2_paths() -> _CgroupV2Paths:
+    directory = _resolve_process_cgroup_v2_directory()
+    if directory is None:
+        return _CgroupV2Paths(
+            current=_CGROUP_V2_CURRENT_PATH,
+            maximum=_CGROUP_V2_MAX_PATH,
+            events=_CGROUP_V2_EVENTS_PATH,
+            stat=_CGROUP_V2_STAT_PATH,
+            reclaim=_CGROUP_V2_RECLAIM_PATH,
+            process_scoped=False,
+        )
+    return _CgroupV2Paths(
+        current=directory / "memory.current",
+        maximum=directory / "memory.max",
+        events=directory / "memory.events",
+        stat=directory / "memory.stat",
+        reclaim=directory / "memory.reclaim",
+        process_scoped=True,
+    )
+
+
+def _reclaim_path() -> Path:
+    # Preserve the long-standing test/integration seam that replaces this constant directly.
+    if _CGROUP_V2_RECLAIM_PATH != _CGROUP_V2_ROOT / "memory.reclaim":
+        return _CGROUP_V2_RECLAIM_PATH
+    return _cgroup_v2_paths().reclaim
 
 
 def _configured_limit_kib(values: Mapping[str, str]) -> int | None:
@@ -192,21 +311,26 @@ def memory_snapshot(values: Mapping[str, str] | None = None) -> MemorySnapshot:
     resolved = dict(os.environ if values is None else values)
     configured_limit = _configured_limit_kib(resolved)
 
-    v2_current_bytes = _read_int(Path("/sys/fs/cgroup/memory.current"))
-    v2_limit_bytes = _read_int(Path("/sys/fs/cgroup/memory.max"))
+    v2 = _cgroup_v2_paths()
+    v2_current_bytes = _read_int(v2.current)
+    v2_limit_bytes = _read_int(v2.maximum)
     if v2_current_bytes is not None:
-        stat = _read_key_values(Path("/sys/fs/cgroup/memory.stat"))
-        events = _read_key_values(Path("/sys/fs/cgroup/memory.events"))
+        stat = _read_key_values(v2.stat)
+        events = _read_key_values(v2.events)
         raw_current = _kib(v2_current_bytes)
         observed_limit = _kib(v2_limit_bytes)
         if configured_limit is not None and (
             observed_limit is None or configured_limit < observed_limit
         ):
             limit = configured_limit
-            source = "cgroup_v2_configured_ceiling"
+            source = (
+                "cgroup_v2_process_configured_ceiling"
+                if v2.process_scoped
+                else "cgroup_v2_configured_ceiling"
+            )
         else:
             limit = observed_limit
-            source = "cgroup_v2"
+            source = "cgroup_v2_process" if v2.process_scoped else "cgroup_v2"
         inactive = _kib(stat.get("inactive_file"))
         return MemorySnapshot(
             raw_current_kib=raw_current,
@@ -356,20 +480,15 @@ def _attempt_cgroup_v2_reclaim(
     *,
     values: Mapping[str, str],
 ) -> tuple[MemoryReclaimResult, MemorySnapshot]:
-    """Request one synchronous cgroup-v2 reclaim and immediately remeasure.
-
-    ``memory.reclaim`` is deliberately best-effort at the syscall/filesystem layer but not
-    at the safety layer: an unavailable or ineffective request never suppresses the existing
-    raw hard ceiling. The caller evaluates the post-reclaim snapshot against unchanged
-    boundaries and terminates if it is still unsafe.
-    """
+    """Request one synchronous process-cgroup-v2 reclaim and immediately remeasure."""
 
     request_kib = _raw_reclaim_request_kib(snapshot, boundaries)
-    supported = snapshot.source.startswith("cgroup_v2") and _CGROUP_V2_RECLAIM_PATH.exists()
+    reclaim_path = _reclaim_path()
+    supported = snapshot.source.startswith("cgroup_v2") and reclaim_path.exists()
     error_type: str | None = None
     if request_kib > 0 and supported:
         try:
-            with _CGROUP_V2_RECLAIM_PATH.open("w", encoding="ascii") as handle:
+            with reclaim_path.open("w", encoding="ascii") as handle:
                 handle.write(str(request_kib * 1024))
                 handle.flush()
         except OSError as error:
@@ -447,12 +566,7 @@ def wait_with_reclaimable_resource_bounds(
     memory_reserve_kib: int | None = None,
     poll_seconds: float | None = None,
 ) -> tuple[int | None, bool, bool, int, int]:
-    """Wait for a child while distinguishing working-set pressure from page cache.
-
-    The return contract intentionally matches the historical watchdog so existing bounded
-    worker callers remain unchanged: ``(return_code, timed_out, memory_limited,
-    process_peak_kib, raw_container_peak_kib)``.
-    """
+    """Wait for a child while distinguishing working-set pressure from page cache."""
 
     resolved = dict(os.environ if values is None else values)
     reserve = int(640 * 1024 if memory_reserve_kib is None else memory_reserve_kib)
