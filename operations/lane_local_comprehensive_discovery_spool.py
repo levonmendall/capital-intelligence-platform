@@ -83,6 +83,12 @@ class LaneShardCatalogs(Mapping[CandidateAssetClass, Sequence[object]]):
         return records
 
 
+def _serialized_blob_descriptor(value: object) -> dict[str, object]:
+    """Normalize a validated slotted blob descriptor for JSON manifest publication."""
+
+    return _legacy._descriptor_dict(_legacy._descriptor(value))
+
+
 def _lane_state_name(prefix: str, index: int) -> str:
     return f"{prefix}-{index:03d}"
 
@@ -520,9 +526,7 @@ def build_spool(
             merged_shards.append(
                 {
                     "asset_class": asset_class.value,
-                    "blob": _legacy._descriptor_dict(
-                        _legacy._descriptor(state.get("blob"))
-                    ),
+                    "blob": _serialized_blob_descriptor(state.get("blob")),
                     "record_count": int(state.get("record_count", 0)),
                 }
             )
