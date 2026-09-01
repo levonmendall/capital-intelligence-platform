@@ -238,7 +238,11 @@ def _run_lane_transaction(
             index=index,
         )
     except BaseException as error:
-        _record_lane_timing(lane_failed_at=_now(), error_type=type(error).__name__)
+        _record_lane_timing(
+            lane_failed_at=_now(),
+            error_type=type(error).__name__,
+            error_detail=_canonical._legacy._safe_detail(error, values),
+        )
         raise
     else:
         _record_lane_timing(lane_completed_at=_now())

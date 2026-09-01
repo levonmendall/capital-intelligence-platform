@@ -191,7 +191,11 @@ def record_lane_phase(
     if not normalized_asset or isinstance(index, bool) or int(index) < 0:
         raise ValueError("lane telemetry identity is invalid")
 
-    allowed = set(_TIMESTAMP_FIELDS) | {"structural_cache_hit", "error_type"}
+    allowed = set(_TIMESTAMP_FIELDS) | {
+        "structural_cache_hit",
+        "error_type",
+        "error_detail",
+    }
     unexpected = set(updates).difference(allowed)
     if unexpected:
         raise ValueError("unsupported lane telemetry field")
@@ -244,6 +248,8 @@ def record_lane_phase(
             entry[name] = value
         elif name == "error_type":
             entry[name] = str(value or "")[:120] or None
+        elif name == "error_detail":
+            entry[name] = str(value or "")[:1600] or None
 
     entry["updated_at"] = _utc_now()
     _recalculate(entry)
@@ -309,6 +315,7 @@ def load_public_lane_telemetry(
             "index": index,
             "structural_cache_hit": cache_hit,
             "error_type": str(raw.get("error_type") or "")[:120] or None,
+            "error_detail": str(raw.get("error_detail") or "")[:1600] or None,
         }
         for field in _TIMESTAMP_FIELDS:
             value = raw.get(field)
