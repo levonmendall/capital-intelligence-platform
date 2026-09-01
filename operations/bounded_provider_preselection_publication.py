@@ -553,27 +553,76 @@ def verify_provider_preselection_publication(
         raise ProviderPreselectionPublicationError(
             "bounded provider publication exact path must not be a symlink"
         )
-    freshness_days = int(getattr(resolved, "preselection_freshness_days", 3))
-    verified = _existing_result_bounded(
+    if int(publication.catalog_count) != len(records):
+        raise ProviderPreselectionPublicationError(
+            "bounded provider publication catalog count changed before verification"
+        )
+    return verify_provider_preselection_artifact(
         path,
         as_of=timestamp,
         fingerprint=fingerprint,
         catalog_count=len(records),
-        freshness_days=freshness_days,
+        signal_count=int(publication.signal_count),
+        available_at=publication.available_at,
+        freshness_days=int(getattr(resolved, "preselection_freshness_days", 3)),
+    )
+
+
+def verify_provider_preselection_artifact(
+    path: str | Path,
+    *,
+    as_of: datetime,
+    fingerprint: str,
+    catalog_count: int,
+    signal_count: int,
+    available_at: datetime,
+    freshness_days: int,
+) -> ProviderPreselectionPublicationResult:
+    """Verify one exact publication from compact transaction metadata only."""
+
+    target = Path(path).expanduser()
+    if target.is_symlink():
+        raise ProviderPreselectionPublicationError(
+            "bounded provider publication exact path must not be a symlink"
+        )
+    verified = _existing_result_bounded(
+        target,
+        as_of=_core._aware(as_of, field_name="as_of"),
+        fingerprint=str(fingerprint),
+        catalog_count=int(catalog_count),
+        freshness_days=int(freshness_days),
     )
     if verified is None:
         raise ProviderPreselectionPublicationError(
             "bounded provider publication failed durable exact-path readback verification"
         )
-    if int(publication.catalog_count) != len(records):
+    if int(verified.catalog_count) != int(catalog_count):
         raise ProviderPreselectionPublicationError(
             "bounded provider publication catalog count changed before verification"
         )
-    if int(verified.signal_count) != int(publication.signal_count):
+    if int(verified.signal_count) != int(signal_count):
         raise ProviderPreselectionPublicationError(
             "bounded provider publication signal count changed during durable readback"
         )
+    expected_available = _core._aware(available_at, field_name="available_at")
+    if verified.available_at != expected_available:
+        raise ProviderPreselectionPublicationError(
+            "bounded provider publication availability timestamp changed during readback"
+        )
     return verified
+
+
+def provider_preselection_catalog_fingerprint(
+    catalogs: Mapping[CandidateAssetClass, Sequence[DiscoveryCatalogRecord]],
+) -> str:
+    """Return the canonical compact fingerprint used by durable publication readback."""
+
+    records = _records_for_lane(catalogs)
+    if not records:
+        raise ProviderPreselectionPublicationError(
+            "provider publication fingerprint requires a nonempty catalog"
+        )
+    return _streaming_catalog_fingerprint(records)
 
 
 def ensure_provider_preselection_publication(
@@ -751,5 +800,7 @@ __all__ = [
     "ProviderPreselectionPublicationError",
     "ProviderPreselectionPublicationResult",
     "ensure_provider_preselection_publication",
+    "provider_preselection_catalog_fingerprint",
+    "verify_provider_preselection_artifact",
     "verify_provider_preselection_publication",
 ]

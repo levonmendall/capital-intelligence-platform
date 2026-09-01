@@ -22,7 +22,7 @@ import argparse
 import os
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from cio import CandidateAssetClass
@@ -254,6 +254,8 @@ def _reusable_transaction_state(
     request_id: str,
     asset_class: str,
     index: int,
+    decision_epoch: datetime,
+    freshness_days: int,
 ) -> Mapping[str, object] | None:
     """Return a prior complete lane transaction only when every retained artifact verifies."""
 
@@ -275,11 +277,11 @@ def _reusable_transaction_state(
         merged = _legacy._descriptor(state.get("blob"))
         _legacy._verify_blob(request_path.parent, merged)
         if state.get("scheduled") is True:
-            if state.get("provider_publication_verified") is not True:
-                return None
-            publication = Path(str(state.get("provider_preselection_path") or ""))
-            if not publication.is_file() or publication.is_symlink():
-                return None
+            verify_transaction_publication_state(
+                state,
+                decision_epoch=decision_epoch,
+                freshness_days=freshness_days,
+            )
             node = state.get("node")
             if not isinstance(node, Mapping):
                 return None
@@ -288,6 +290,60 @@ def _reusable_transaction_state(
     except (OSError, RuntimeError, TypeError, ValueError, _legacy.ComprehensiveDiscoverySpoolError):
         return None
     return state
+
+
+def verify_transaction_publication_state(
+    state: Mapping[str, object],
+    *,
+    decision_epoch: datetime,
+    freshness_days: int,
+) -> _publication.ProviderPreselectionPublicationResult:
+    """Reopen the exact child publication from compact committed transaction proof."""
+
+    if state.get("provider_publication_verified") is not True:
+        raise _legacy.ComprehensiveDiscoverySpoolError(
+            "transactional scheduled lane lacks verified provider publication"
+        )
+    completed_at = _legacy._parse_timestamp(
+        state.get("provider_publication_completed_at"),
+        field_name="provider_publication_completed_at",
+    )
+    if completed_at < decision_epoch:
+        raise _legacy.ComprehensiveDiscoverySpoolError(
+            "transactional provider publication completion predates its decision epoch"
+        )
+    path = Path(str(state.get("provider_preselection_path") or ""))
+    fingerprint = str(state.get("provider_publication_fingerprint") or "").strip()
+    if not fingerprint:
+        raise _legacy.ComprehensiveDiscoverySpoolError(
+            "transactional provider publication fingerprint is unavailable"
+        )
+    try:
+        catalog_count = int(state.get("provider_publication_catalog_count"))
+        signal_count = int(state.get("provider_publication_signal_count"))
+        available_at = _legacy._parse_timestamp(
+            state.get("provider_publication_available_at"),
+            field_name="provider_publication_available_at",
+        )
+        return _publication.verify_provider_preselection_artifact(
+            path,
+            as_of=decision_epoch,
+            fingerprint=fingerprint,
+            catalog_count=catalog_count,
+            signal_count=signal_count,
+            available_at=available_at,
+            freshness_days=int(freshness_days),
+        )
+    except (
+        OSError,
+        TypeError,
+        ValueError,
+        _publication.ProviderPreselectionPublicationError,
+    ) as error:
+        raise _legacy.ComprehensiveDiscoverySpoolError(
+            "transactional provider publication failed committed exact-path readback; "
+            f"failure_type={type(error).__name__}; detail={error}"
+        ) from error
 
 
 def run_lane_transaction(
@@ -304,18 +360,19 @@ def run_lane_transaction(
     try:
         request, policy = _bounded._validate_request(path, values)
         request_id = str(request.get("request_id") or "")
+        timestamp = _legacy._parse_timestamp(
+            request.get("decision_epoch"), field_name="decision_epoch"
+        )
         reusable = _reusable_transaction_state(
             path,
             request_id=request_id,
             asset_class=asset_class_value,
             index=index,
+            decision_epoch=timestamp,
+            freshness_days=int(getattr(policy, "preselection_freshness_days", 3)),
         )
         if reusable is not None:
             return reusable
-
-        timestamp = _legacy._parse_timestamp(
-            request.get("decision_epoch"), field_name="decision_epoch"
-        )
         asset_class = CandidateAssetClass(asset_class_value)
         directory = path.parent
 
@@ -353,6 +410,8 @@ def run_lane_transaction(
         publication_path: str | None = None
         publication_verified = False
         publication_result: _publication.ProviderPreselectionPublicationResult | None = None
+        publication_fingerprint: str | None = None
+        publication_completed_at: str | None = None
         lane_policy = None
         if scheduled:
             publication_file = _publication_path(
@@ -363,6 +422,11 @@ def run_lane_transaction(
                 policy, provider_preselection_path=publication_path
             )
             try:
+                publication_fingerprint = (
+                    _publication.provider_preselection_catalog_fingerprint(
+                        {asset_class: merged}
+                    )
+                )
                 publication_result = _publication.ensure_provider_preselection_publication(
                     {asset_class: merged},
                     as_of=timestamp,
@@ -397,6 +461,21 @@ def run_lane_transaction(
             "scheduled": scheduled,
             "provider_preselection_path": publication_path,
             "provider_publication_verified": publication_verified,
+            "provider_publication_fingerprint": publication_fingerprint,
+            "provider_publication_catalog_count": (
+                None if publication_result is None else publication_result.catalog_count
+            ),
+            "provider_publication_signal_count": (
+                None if publication_result is None else publication_result.signal_count
+            ),
+            "provider_publication_available_at": (
+                None
+                if publication_result is None
+                else publication_result.available_at.isoformat()
+            ),
+            "provider_publication_freshness_days": int(
+                getattr(policy, "preselection_freshness_days", 3)
+            ),
             "peak_rss_bytes": peak,
             "bounded_provider_publication": True,
             "transactional_lane_compaction": True,
@@ -454,6 +533,7 @@ def run_lane_transaction(
                     f"{asset_class.value} provider publication failed pre-commit readback; "
                     f"failure_type={type(error).__name__}; detail={error}"
                 ) from error
+            publication_completed_at = datetime.now(timezone.utc).isoformat()
 
         transaction_state: dict[str, object] = {
             "request_id": request_id,
@@ -465,6 +545,22 @@ def run_lane_transaction(
             "scheduled": scheduled,
             "provider_preselection_path": publication_path,
             "provider_publication_verified": publication_verified,
+            "provider_publication_fingerprint": publication_fingerprint,
+            "provider_publication_catalog_count": (
+                None if publication_result is None else publication_result.catalog_count
+            ),
+            "provider_publication_signal_count": (
+                None if publication_result is None else publication_result.signal_count
+            ),
+            "provider_publication_available_at": (
+                None
+                if publication_result is None
+                else publication_result.available_at.isoformat()
+            ),
+            "provider_publication_completed_at": publication_completed_at,
+            "provider_publication_freshness_days": int(
+                getattr(policy, "preselection_freshness_days", 3)
+            ),
             "node": dict(node_body) if isinstance(node_body, Mapping) else None,
             "compatibility_rebound": rebound,
             "peak_rss_bytes": peak,

@@ -38,6 +38,9 @@ _OPERATING_SUBPROCESS_TIMEOUT_ENV = (
 )
 _OPERATING_PASS_TIMEOUT_ENV = "CAPITAL_INTELLIGENCE_OPERATING_EVIDENCE_PASS_TIMEOUT_SECONDS"
 _DIAGNOSTIC_TIMEOUT_ENV = "CAPITAL_INTELLIGENCE_MANUAL_CIO_DIAGNOSTIC_TIMEOUT_SECONDS"
+_DIAGNOSTIC_LIFECYCLE_STARTED_AT_ENV = (
+    "CAPITAL_INTELLIGENCE_RELEASE_DIAGNOSTIC_LIFECYCLE_STARTED_AT"
+)
 
 
 def _utc_now() -> datetime:
@@ -81,10 +84,24 @@ def _remaining_diagnostic_seconds(
     now: datetime | None = None,
 ) -> float | None:
     request = _current_pending_request(values)
-    if request is None:
+    lifecycle_started_at: datetime | None = None
+    raw_lifecycle = str(values.get(_DIAGNOSTIC_LIFECYCLE_STARTED_AT_ENV) or "").strip()
+    if raw_lifecycle:
+        try:
+            lifecycle_started_at = datetime.fromisoformat(
+                raw_lifecycle.replace("Z", "+00:00")
+            ).astimezone(timezone.utc)
+        except (TypeError, ValueError):
+            lifecycle_started_at = None
+    if request is None and lifecycle_started_at is None:
         return None
     current = (now or _utc_now()).astimezone(timezone.utc)
-    deadline = request.requested_at.astimezone(timezone.utc) + timedelta(
+    starts = []
+    if request is not None:
+        starts.append(request.requested_at.astimezone(timezone.utc))
+    if lifecycle_started_at is not None:
+        starts.append(lifecycle_started_at)
+    deadline = min(starts) + timedelta(
         seconds=_diagnostic_timeout_seconds(values)
     )
     return max(0.0, (deadline - current).total_seconds())

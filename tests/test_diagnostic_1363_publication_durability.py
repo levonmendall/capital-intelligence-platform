@@ -14,7 +14,12 @@ from operations import transactional_lane_comprehensive_discovery_coordinator as
 
 def test_bounded_publication_fails_when_atomic_artifact_does_not_survive_readback(monkeypatch, tmp_path: Path) -> None:
     target = tmp_path / "provider.json"
-    candidate = SimpleNamespace(path=target, catalog_count=1, signal_count=1)
+    candidate = SimpleNamespace(
+        path=target,
+        catalog_count=1,
+        signal_count=1,
+        available_at=datetime.now(timezone.utc),
+    )
     monkeypatch.setattr(publication, "_records_for_lane", lambda catalogs: (object(),))
     monkeypatch.setattr(publication, "_streaming_catalog_fingerprint", lambda records: "fp")
     monkeypatch.setattr(publication, "_existing_result_bounded", lambda *args, **kwargs: None)
@@ -56,6 +61,8 @@ def test_transaction_resume_refuses_unverified_scheduled_publication(monkeypatch
         request_id="request-1",
         asset_class="international_equity",
         index=4,
+        decision_epoch=datetime.now(timezone.utc),
+        freshness_days=3,
     ) is None
 
 
@@ -92,7 +99,7 @@ def test_parent_refuses_lane_completion_without_publication_proof(monkeypatch, t
 
     with pytest.raises(
         legacy.ComprehensiveDiscoverySpoolError,
-        match="lacks verified provider publication",
+        match="lacks committed provider publication readback",
     ):
         coordinator._run_lane_transaction(
             tmp_path / "request.json",
@@ -100,4 +107,27 @@ def test_parent_refuses_lane_completion_without_publication_proof(monkeypatch, t
             asset_class="international_equity",
             index=4,
             decision_epoch=datetime.now(timezone.utc),
+        )
+
+
+def test_committed_publication_requires_actual_completion_timestamp(tmp_path: Path) -> None:
+    decision_epoch = datetime.now(timezone.utc)
+    state = {
+        "provider_publication_verified": True,
+        "provider_preselection_path": str(tmp_path / "provider.json"),
+        "provider_publication_fingerprint": "fingerprint",
+        "provider_publication_catalog_count": 1,
+        "provider_publication_signal_count": 1,
+        "provider_publication_available_at": decision_epoch.isoformat(),
+        "provider_publication_completed_at": None,
+    }
+
+    with pytest.raises(
+        legacy.ComprehensiveDiscoverySpoolError,
+        match="provider_publication_completed_at",
+    ):
+        transaction.verify_transaction_publication_state(
+            state,
+            decision_epoch=decision_epoch,
+            freshness_days=3,
         )

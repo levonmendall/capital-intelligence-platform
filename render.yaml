@@ -149,6 +149,11 @@ services:
         value: "true"
       - key: CAPITAL_INTELLIGENCE_PUBLIC_LIVE_COLLECTION_INTERVAL_SECONDS
         value: "900"
+      # Independent Massive futures-reference roots run in a small process batch after
+      # CME venue acquisition. The existing 45-second timeout remains per root; this cap
+      # bounds simultaneous fallback memory while removing serial timeout amplification.
+      - key: CAPITAL_INTELLIGENCE_FUTURES_REFERENCE_FALLBACK_MAX_WORKERS
+        value: "3"
       - key: CAPITAL_INTELLIGENCE_EODHD_BINDINGS
         value: config/eodhd_instrument_bindings.all_markets.json
       - key: CAPITAL_INTELLIGENCE_CRYPTO_VENUE_BINDINGS

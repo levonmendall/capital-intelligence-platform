@@ -24,6 +24,7 @@ from operations.supervised_component_execution import (
     SupervisedComponentExecutionError,
     SupervisedComponentTimeout,
     run_supervised_component,
+    run_supervised_components,
 )
 from providers.cme_futures_reference_executable import (
     CmeExecutableFuturesReferenceProvider,
@@ -39,6 +40,11 @@ from providers.massive_multi_asset import MassiveFuturesContract, MassiveMultiAs
 _PROGRESS_SCHEMA = "futures-reference-prequalification-progress.v1"
 _UNIT_TIMEOUT_ENV = "CAPITAL_INTELLIGENCE_FUTURES_REFERENCE_UNIT_TIMEOUT_SECONDS"
 _DEFAULT_UNIT_TIMEOUT_SECONDS = 45.0
+_FALLBACK_MAX_WORKERS_ENV = (
+    "CAPITAL_INTELLIGENCE_FUTURES_REFERENCE_FALLBACK_MAX_WORKERS"
+)
+_DEFAULT_FALLBACK_MAX_WORKERS = 3
+_MAX_FALLBACK_MAX_WORKERS = 4
 
 
 def _release(values: Mapping[str, str]) -> str:
@@ -114,6 +120,26 @@ def _unit_timeout_seconds(values: Mapping[str, str]) -> float:
     return timeout
 
 
+def _fallback_max_workers(values: Mapping[str, str]) -> int:
+    raw = str(
+        values.get(_FALLBACK_MAX_WORKERS_ENV)
+        or os.getenv(_FALLBACK_MAX_WORKERS_ENV, "")
+        or ""
+    ).strip()
+    if not raw:
+        return _DEFAULT_FALLBACK_MAX_WORKERS
+    try:
+        workers = int(raw)
+    except ValueError as error:
+        raise ValueError(f"{_FALLBACK_MAX_WORKERS_ENV} must be an integer") from error
+    if workers < 1 or workers > _MAX_FALLBACK_MAX_WORKERS:
+        raise ValueError(
+            f"{_FALLBACK_MAX_WORKERS_ENV} must be between 1 and "
+            f"{_MAX_FALLBACK_MAX_WORKERS}"
+        )
+    return workers
+
+
 def _root_set(
     rows: Sequence[MassiveFuturesContract],
     *,
@@ -145,6 +171,7 @@ class GranularFuturesReferenceProvider:
         cme_provider: CmeExecutableFuturesReferenceProvider | None = None,
         massive_provider_factory: Callable[[], MassiveFuturesReferenceProvider] | None = None,
         component_runner: Callable[..., Any] = run_supervised_component,
+        batch_component_runner: Callable[..., Mapping[str, Any | BaseException]] | None = None,
         clock: Callable[[], datetime] | None = None,
     ) -> None:
         self.values = os.environ if values is None else values
@@ -156,6 +183,11 @@ class GranularFuturesReferenceProvider:
             massive_provider_factory or MassiveFuturesReferenceProvider
         )
         self._component_runner = component_runner
+        self._batch_component_runner = (
+            run_supervised_components
+            if batch_component_runner is None and component_runner is run_supervised_component
+            else batch_component_runner
+        )
         self._clock = clock or (lambda: datetime.now(timezone.utc))
         self._reference_telemetry: list[dict[str, object]] = []
         self._reference_metadata: dict[str, object] = {}
@@ -164,6 +196,8 @@ class GranularFuturesReferenceProvider:
         self._required_roots: tuple[str, ...] = ()
         self._qualified_roots: set[str] = set()
         self._active_unit: str | None = None
+        self._active_units: tuple[str, ...] = ()
+        self._deferred_fallbacks: list[tuple[str, str]] = []
 
     @property
     def configured(self) -> bool:
@@ -197,6 +231,7 @@ class GranularFuturesReferenceProvider:
                 "qualified_roots": sorted(self._qualified_roots),
                 "unresolved_roots": unresolved,
                 "active_unit": self._active_unit,
+                "active_units": list(self._active_units),
                 "units": [dict(item) for item in self._units],
                 "credential_safe": True,
                 "decision_evidence_authority": False,
@@ -218,6 +253,9 @@ class GranularFuturesReferenceProvider:
         failure_type: str | None = None,
         fallback: bool = False,
         detail: str | None = None,
+        provider_error_type: str | None = None,
+        http_status: int | None = None,
+        retryable: bool | None = None,
     ) -> None:
         self._units.append(
             {
@@ -231,6 +269,9 @@ class GranularFuturesReferenceProvider:
                 "failure_type": failure_type,
                 "fallback": bool(fallback),
                 "detail": detail,
+                "provider_error_type": provider_error_type,
+                "http_status": http_status,
+                "retryable": retryable,
             }
         )
 
@@ -268,7 +309,12 @@ class GranularFuturesReferenceProvider:
                 duration_ms=elapsed,
                 failure_type=failure_type,
                 fallback=fallback,
-                detail=type(error).__name__,
+                detail=str(error),
+                provider_error_type=(
+                    getattr(error, "remote_error_type", None) or type(error).__name__
+                ),
+                http_status=getattr(error, "status_code", None),
+                retryable=getattr(error, "retryable", None),
             )
             return None
         finally:
@@ -402,6 +448,152 @@ class GranularFuturesReferenceProvider:
         self._qualified_roots.add(root)
         return rows
 
+    def _collect_massive_roots(
+        self,
+        *,
+        units: Sequence[tuple[str, str]],
+        as_of: datetime,
+        maximum_pages: int,
+    ) -> tuple[MassiveFuturesContract, ...]:
+        """Collect independent fallback roots in a bounded concurrent process batch."""
+
+        ordered = tuple(dict.fromkeys((str(venue), str(root)) for venue, root in units))
+        if not ordered:
+            return ()
+        if self._batch_component_runner is None or len(ordered) == 1:
+            sequential: list[MassiveFuturesContract] = []
+            for venue, root in ordered:
+                sequential.extend(
+                    self._collect_massive_root(
+                        venue=venue,
+                        root=root,
+                        as_of=as_of,
+                        maximum_pages=maximum_pages,
+                    )
+                )
+            return tuple(sequential)
+
+        collected: list[MassiveFuturesContract] = []
+        pending: list[tuple[str, str, MassiveFuturesReferenceProvider]] = []
+        for venue, root in ordered:
+            provider = self._massive_provider_factory()
+            cached = self._massive_cached(root=root, as_of=as_of, provider=provider)
+            if cached is not None and self.cme._complete(cached, (root,)):
+                rows = tuple(cached)
+                self._record_unit(
+                    unit=f"massive-root-{root}",
+                    provider="massive",
+                    state="reused",
+                    roots=(root,),
+                    venue=venue,
+                    root=root,
+                    fallback=True,
+                )
+                self._persist_root_checkpoint(
+                    venue=venue,
+                    root=root,
+                    as_of=as_of,
+                    contracts=rows,
+                    business_dates=(as_of.date(),),
+                )
+                self._qualified_roots.add(root)
+                collected.extend(rows)
+                continue
+            pending.append((venue, root, provider))
+
+        if not pending:
+            return tuple(collected)
+
+        tasks = {
+            f"massive-root-{root}": (
+                lambda provider=provider, root=root: provider.futures_contracts(
+                    as_of=as_of,
+                    product_codes=(root,),
+                    maximum_pages=maximum_pages,
+                )
+            )
+            for _venue, root, provider in pending
+        }
+        self._active_unit = "massive-fallback-batch"
+        self._active_units = tuple(tasks)
+        self._write_progress(state="qualifying")
+        started = time.monotonic()
+        try:
+            outcomes = self._batch_component_runner(
+                components=tasks,
+                timeout_seconds=_unit_timeout_seconds(self.values),
+                maximum_parallel=_fallback_max_workers(self.values),
+            )
+        finally:
+            self._active_unit = None
+            self._active_units = ()
+        elapsed = int((time.monotonic() - started) * 1000)
+
+        for venue, root, _provider in pending:
+            unit = f"massive-root-{root}"
+            outcome = outcomes.get(unit)
+            if isinstance(outcome, BaseException):
+                failure_type = _failure_kind(outcome)
+                unit_elapsed = int(
+                    getattr(outcome, "supervised_duration_ms", elapsed)
+                )
+                self._record_unit(
+                    unit=unit,
+                    provider="massive",
+                    state="timed-out" if failure_type == "timeout" else "failed",
+                    roots=(root,),
+                    venue=venue,
+                    root=root,
+                    duration_ms=unit_elapsed,
+                    failure_type=failure_type,
+                    fallback=True,
+                    detail=str(outcome),
+                    provider_error_type=(
+                        getattr(outcome, "remote_error_type", None)
+                        or type(outcome).__name__
+                    ),
+                    http_status=getattr(outcome, "status_code", None),
+                    retryable=getattr(outcome, "retryable", None),
+                )
+                continue
+            rows = () if outcome is None else tuple(outcome)
+            if not rows or not self.cme._complete(rows, (root,)):
+                self._record_unit(
+                    unit=unit,
+                    provider="massive",
+                    state="failed",
+                    roots=(root,),
+                    venue=venue,
+                    root=root,
+                    duration_ms=elapsed,
+                    failure_type="incomplete_root_coverage",
+                    fallback=True,
+                    detail="Massive fallback returned no complete active root coverage",
+                )
+                continue
+            self._record_unit(
+                unit=unit,
+                provider="massive",
+                state="qualified",
+                roots=(root,),
+                venue=venue,
+                root=root,
+                duration_ms=elapsed,
+                fallback=True,
+            )
+            self._persist_root_checkpoint(
+                venue=venue,
+                root=root,
+                as_of=as_of,
+                contracts=rows,
+                business_dates=(as_of.date(),),
+            )
+            self._qualified_roots.add(root)
+            collected.extend(rows)
+
+        self._write_progress(state="qualifying")
+        return tuple(collected)
+
     def _collect_venue(
         self,
         *,
@@ -480,15 +672,7 @@ class GranularFuturesReferenceProvider:
 
             unresolved = [root for root in unresolved if root not in cme_covered]
 
-        for root in unresolved:
-            fallback_rows = self._collect_massive_root(
-                venue=venue,
-                root=root,
-                as_of=as_of,
-                maximum_pages=maximum_pages,
-            )
-            for row in fallback_rows:
-                result[(root, row.ticker)] = row
+        self._deferred_fallbacks.extend((venue, root) for root in unresolved)
 
         return tuple(
             sorted(result.values(), key=lambda row: (row.product_code, row.ticker))
@@ -521,6 +705,8 @@ class GranularFuturesReferenceProvider:
         self._qualified_roots = set()
         self._units = []
         self._active_unit = None
+        self._active_units = ()
+        self._deferred_fallbacks = []
         self._write_progress(state="qualifying")
 
         complete_cache = self.cme._records_from_cache(roots=roots, as_of=timestamp)
@@ -564,15 +750,14 @@ class GranularFuturesReferenceProvider:
             self._write_progress(state="qualifying")
 
         unmapped = tuple(root for root in roots if _ROOT_VENUES.get(root) is None)
-        for root in unmapped:
-            for row in self._collect_massive_root(
-                venue="UNMAPPED",
-                root=root,
-                as_of=timestamp,
-                maximum_pages=maximum_pages,
-            ):
-                contracts[(row.product_code.strip().upper(), row.ticker)] = row
-            self._write_progress(state="qualifying")
+        self._deferred_fallbacks.extend(("UNMAPPED", root) for root in unmapped)
+        for row in self._collect_massive_roots(
+            units=self._deferred_fallbacks,
+            as_of=timestamp,
+            maximum_pages=maximum_pages,
+        ):
+            contracts[(row.product_code.strip().upper(), row.ticker)] = row
+        self._write_progress(state="qualifying")
 
         result = tuple(
             sorted(contracts.values(), key=lambda row: (row.product_code, row.ticker))
@@ -588,6 +773,7 @@ class GranularFuturesReferenceProvider:
             "covered_roots": len(covered),
             "unresolved_roots": list(unresolved),
             "unit_timeout_seconds": _unit_timeout_seconds(self.values),
+            "fallback_max_workers": _fallback_max_workers(self.values),
             "unit_count": len(self._units),
         }
 
