@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timedelta, timezone
 
 import requests
@@ -41,6 +42,54 @@ def test_progress_round_trip_is_exact_release_and_non_authoritative(tmp_path) ->
 
     different_release = dict(values, CAPITAL_INTELLIGENCE_RELEASE="other-release")
     assert preparation.load_evidence_preparation_progress(different_release) is None
+
+
+def test_publication_progress_round_trip_is_exact_release_and_non_authoritative(tmp_path) -> None:
+    values = {
+        "CAPITAL_INTELLIGENCE_DATA_DIR": str(tmp_path),
+        "CAPITAL_INTELLIGENCE_RELEASE": "release-test",
+    }
+
+    written = preparation.record_provider_publication_progress(
+        values,
+        completed_provider_publications=3,
+    )
+    loaded = preparation.load_evidence_preparation_progress(values)
+
+    assert written is not None
+    assert loaded is not None
+    assert loaded["progress_semantics"] == "distinct-provider-publication-promotions"
+    assert loaded["metrics"] == {"provider_publications_completed": 3}
+    assert loaded["credential_safe"] is True
+    assert loaded["decision_authority"] is False
+    assert loaded["execution_authority"] is False
+    assert loaded["paper_only"] is True
+    assert loaded["real_money_authorized"] is False
+
+
+def test_publication_snapshot_changes_only_for_new_atomic_identity(tmp_path) -> None:
+    values = {
+        "CAPITAL_INTELLIGENCE_DATA_DIR": str(tmp_path),
+        "CAPITAL_INTELLIGENCE_RELEASE": "release-test",
+    }
+    root = preparation._publication_root(values)
+    assert root is not None
+    directory = root / "request-a"
+    directory.mkdir(parents=True)
+    path = directory / "provider-preselection-004-international_equity.json"
+    path.write_text("first", encoding="utf-8")
+
+    first = preparation._publication_snapshot(root)
+    second = preparation._publication_snapshot(root)
+    assert second == first
+
+    replacement = path.with_name(path.name + ".new")
+    replacement.write_text("second-publication", encoding="utf-8")
+    os.replace(replacement, path)
+    third = preparation._publication_snapshot(root)
+
+    assert third.keys() == first.keys()
+    assert third != first
 
 
 def test_integrity_change_invalidates_progress(tmp_path) -> None:
@@ -87,6 +136,7 @@ def test_request_hook_records_only_distinct_work_units_after_public_qualificatio
         "record_evidence_preparation_progress",
         lambda _values, *, completed_provider_calls: captured.append(completed_provider_calls),
     )
+    monkeypatch.setattr(preparation, "_start_provider_publication_progress_watch", lambda _values: None)
 
     preparation.install_post_public_provider_progress(values)
     session = requests.Session()
@@ -129,6 +179,7 @@ def test_request_hook_duplicate_failure_does_not_heartbeat_or_swallow_exception(
         "record_evidence_preparation_progress",
         lambda _values, *, completed_provider_calls: captured.append(completed_provider_calls),
     )
+    monkeypatch.setattr(preparation, "_start_provider_publication_progress_watch", lambda _values: None)
 
     preparation.install_post_public_provider_progress(values)
     session = requests.Session()
@@ -184,6 +235,35 @@ def test_parent_watchdog_prefers_newer_pre_dag_progress(monkeypatch) -> None:
     assert progress.component == "post-public-provider-io"
     assert progress.state == "running"
     assert progress.metrics == {"provider_calls_completed": 11}
+    assert progress.stall_limit_seconds == 180
+
+
+def test_parent_watchdog_accepts_cross_process_publication_progress(monkeypatch) -> None:
+    started = datetime.now(timezone.utc)
+    publication_at = started + timedelta(seconds=7)
+
+    monkeypatch.setattr(watchdog, "load_reference_prequalification_progress", lambda _values: None)
+    monkeypatch.setattr(watchdog, "load_public_live_requirement_progress", lambda _values: None)
+    monkeypatch.setattr(
+        watchdog,
+        "load_evidence_preparation_progress",
+        lambda _values: {
+            "updated_at": publication_at.isoformat(),
+            "stage": "post-public-provider-io",
+            "metrics": {"provider_publications_completed": 2},
+        },
+    )
+    monkeypatch.setattr(
+        watchdog,
+        "load_release_certification_dag_progress",
+        lambda _values, started_at=None: None,
+    )
+
+    progress = watchdog.observe_current_prequalification_progress({}, started_at=started)
+
+    assert progress.phase == "discovery_preparation"
+    assert progress.component == "post-public-provider-io"
+    assert progress.metrics == {"provider_publications_completed": 2}
     assert progress.stall_limit_seconds == 180
 
 
