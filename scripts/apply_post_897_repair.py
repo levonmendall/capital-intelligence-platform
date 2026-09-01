@@ -93,7 +93,7 @@ def patch_prewarm() -> None:
     text = replace_once(text, old_initial, new_initial, label="initial lane helper")
 
     replay_start = text.index("def _provider_replay_lane_items(\n")
-    replay_end = text.index("\n\ndef _provider_replay_reserve_seconds(\n", replay_start)
+    replay_end = text.index("\n\ndef _provider_replay_reserve_seconds(", replay_start)
     replay = '''def _provider_replay_lane_items(
     request_path: str | Path,
     *,
