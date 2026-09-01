@@ -689,6 +689,7 @@ def prepare_lane_provider_publication(
     staging_path = canonical_path.with_name(canonical_path.name + ".fanout")
     _remove_staging_publication(staging_path)
     lane_policy = replace(policy, provider_preselection_path=str(staging_path))
+    promoted = False
     try:
         result = publication.ensure_provider_preselection_publication(
             {asset_class: merged},
@@ -718,8 +719,22 @@ def prepare_lane_provider_publication(
                 f"{asset_class.value} provider fanout produced limited evidence"
             )
         staging_path.replace(canonical_path)
+        promoted = True
+        publication.verify_provider_preselection_artifact(
+            canonical_path,
+            as_of=timestamp,
+            fingerprint=publication.provider_preselection_catalog_fingerprint(
+                {asset_class: merged}
+            ),
+            catalog_count=int(result.catalog_count),
+            signal_count=int(result.signal_count),
+            available_at=result.available_at,
+            freshness_days=int(getattr(policy, "preselection_freshness_days", 3)),
+        )
     except BaseException:
         _remove_staging_publication(staging_path)
+        if promoted:
+            _remove_staging_publication(canonical_path)
         raise
 
     return {
@@ -804,18 +819,27 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--asset-class", required=True)
     parser.add_argument("--index", required=True, type=int)
     args = parser.parse_args(argv)
+    values = dict(os.environ)
     try:
         if args.prepare_structure:
             prepare_lane_structural_catalog(
                 args.request,
-                values=dict(os.environ),
+                values=values,
                 asset_class_value=str(args.asset_class),
                 index=int(args.index),
             )
         else:
+            try:
+                from operations.evidence_preparation_progress import (
+                    install_post_public_provider_progress,
+                )
+
+                install_post_public_provider_progress(values)
+            except Exception:  # noqa: BLE001 - supervision remains fail-closed without it.
+                pass
             prepare_lane_provider_publication(
                 args.request,
-                values=dict(os.environ),
+                values=values,
                 asset_class_value=str(args.asset_class),
                 index=int(args.index),
             )
