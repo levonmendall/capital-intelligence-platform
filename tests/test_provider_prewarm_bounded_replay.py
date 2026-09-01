@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from cio import CandidateAssetClass
 from operations import comprehensive_discovery_structural_prewarm as overlap
 from operations import epoch_scoped_provider_acquisition as acquisition
 
@@ -23,8 +24,6 @@ def test_unresolved_provider_lane_replays_inside_original_budget(monkeypatch, tm
     monkeypatch.setattr(
         acquisition,
         "_fanout_budget_seconds",
-        # 42 governed spare seconds leave the same 10-second replay window after the
-        # separate 30-second operational handoff + 2-second cleanup reserve.
         lambda decision_epoch, values: 42.0,
     )
 
@@ -162,6 +161,44 @@ def test_missing_publication_path_replays_even_when_child_count_reports_complete
     assert result["provider_replay_initial_unresolved"] == 0
     assert result["provider_replay_initial_missing_publication_paths"] == 1
     assert result["provider_replay_final_missing_publication_paths"] == 1
+
+
+def test_existing_but_invalid_publication_is_prioritized_for_repair(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    lanes = (
+        (0, CandidateAssetClass.US_EQUITY),
+        (4, CandidateAssetClass.INTERNATIONAL_EQUITY),
+    )
+    observed_values: list[dict[str, str]] = []
+
+    monkeypatch.setattr(acquisition, "_scheduled_lane_items", lambda _epoch: lanes)
+
+    def validate(_request_path, *, values, asset_class_value, index):
+        observed_values.append(dict(values))
+        assert values[acquisition._REUSE_ONLY_ENV] == "true"
+        if asset_class_value == CandidateAssetClass.INTERNATIONAL_EQUITY.value:
+            raise RuntimeError("epoch-scoped provider publication is unavailable or invalid")
+        return {
+            "scheduled": True,
+            "asset_class": asset_class_value,
+            "publication_ready": True,
+            "reused": True,
+        }
+
+    monkeypatch.setattr(acquisition, "prepare_lane_provider_publication", validate)
+
+    missing, reusable = overlap._provider_lane_partition(
+        tmp_path / "request.json",
+        acquisition=acquisition,
+        decision_epoch=_as_of(),
+        values={"RENDER": "true"},
+    )
+
+    assert missing == ((4, CandidateAssetClass.INTERNATIONAL_EQUITY),)
+    assert reusable == ((0, CandidateAssetClass.US_EQUITY),)
+    assert len(observed_values) == 2
 
 
 def test_replay_does_not_extend_exhausted_original_window(monkeypatch, tmp_path) -> None:
