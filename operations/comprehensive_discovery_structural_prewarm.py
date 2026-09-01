@@ -14,15 +14,14 @@ stage will use, then delegates structural preparation and provider I/O to the ex
 300-second acceleration ceiling, six-worker cap, evidence lifetime, and 480-second downstream
 reserve. Provider children atomically promote only clean, limitation-free publications.
 
-The early owner prioritizes absent exact-request publication paths on its first pass while
-preserving the complete scheduled lane set. This is only a scheduling hint: canonical
-provider children and the later transactional handoff still validate identity, fingerprint,
-limitations, and epoch compatibility. On a full production acquisition window, a bounded
-suffix of that same fixed window is reserved for the one replay so the first fanout cannot
-consume the entire legal provider window before an absent publication can be retried; short
-windows preserve their existing first-pass budget. If unresolved lanes remain, the replay
-targets still-missing paths first. Neither prioritization nor replay extends or resets the
-provider budget.
+The early owner prioritizes exact-request publications that are absent or cannot pass the
+existing canonical reuse validator while preserving the complete scheduled lane set. This
+is only a scheduling decision: it grants no evidence authority. On a full production
+acquisition window, a bounded suffix of that same fixed window is reserved for the one
+replay so the first fanout cannot consume the entire legal provider window before an
+unusable publication can be rebuilt; short windows preserve their existing first-pass
+budget. If unresolved or unusable lanes remain, the replay targets those lanes first.
+Neither prioritization nor replay extends or resets the provider budget.
 
 The U.S.-equity handoff also releases bounded clean file-cache pages left by completed
 public-live work before starting the sidecar and discovery. That advisory reclamation runs in
@@ -118,31 +117,36 @@ def _provider_lane_partition(
     *,
     acquisition,
     decision_epoch: datetime,
+    values: Mapping[str, str] | None = None,
 ) -> tuple[
     tuple[tuple[int, CandidateAssetClass], ...],
     tuple[tuple[int, CandidateAssetClass], ...],
 ]:
-    """Partition scheduled lanes by exact-request publication file presence.
+    """Partition lanes by canonical exact-request publication reusability.
 
-    File presence is only a scheduling hint. A present path receives no evidence authority;
-    canonical provider and transactional validation still decides whether it can be reused.
+    The scheduler invokes the existing provider-publication validator in reuse-only mode.
+    That mode cannot perform provider I/O, so an absent, malformed, limited, stale, or
+    request-incompatible artifact is merely prioritized for the bounded acquisition/replay
+    that already exists. Validation remains advisory here; the later serialized transaction
+    independently repeats the same fail-closed reuse-only handoff.
     """
 
+    resolved = dict(os.environ if values is None else values)
+    reuse_only_values = dict(resolved)
+    reuse_only_values[acquisition._REUSE_ONLY_ENV] = "true"
     lane_items = tuple(acquisition._scheduled_lane_items(decision_epoch))
-    directory = Path(request_path).expanduser().parent
     missing: list[tuple[int, CandidateAssetClass]] = []
     present: list[tuple[int, CandidateAssetClass]] = []
     for index, asset_class in lane_items:
-        publication_path = directory / (
-            f"provider-preselection-{index:03d}-{asset_class.value}.json"
-        )
         try:
-            ready_hint = (
-                publication_path.is_file()
-                and not publication_path.is_symlink()
-                and publication_path.stat().st_size > 0
+            result = acquisition.prepare_lane_provider_publication(
+                request_path,
+                values=reuse_only_values,
+                asset_class_value=asset_class.value,
+                index=index,
             )
-        except OSError:
+            ready_hint = result.get("publication_ready") is True
+        except (OSError, RuntimeError, TypeError, ValueError):
             ready_hint = False
         if ready_hint:
             present.append((index, asset_class))
@@ -156,13 +160,15 @@ def _provider_initial_lane_items(
     *,
     acquisition,
     decision_epoch: datetime,
+    values: Mapping[str, str] | None = None,
 ) -> tuple[tuple[int, CandidateAssetClass], ...]:
-    """Run absent publication paths first without dropping any scheduled lane."""
+    """Run unusable publication paths first without dropping any scheduled lane."""
 
     missing, present = _provider_lane_partition(
         request_path,
         acquisition=acquisition,
         decision_epoch=decision_epoch,
+        values=values,
     )
     return missing + present
 
@@ -172,22 +178,21 @@ def _provider_replay_lane_items(
     *,
     acquisition,
     decision_epoch: datetime,
+    values: Mapping[str, str] | None = None,
 ) -> tuple[tuple[int, CandidateAssetClass], ...]:
-    """Target absent exact-request publications on bounded replay.
+    """Target canonically unusable exact-request publications on bounded replay.
 
-    This is only a replay scheduling hint. A regular non-symlink file at the canonical
-    exact-request path is not treated as evidence or as a validated publication; the
-    provider child and later transactional lane still perform the existing integrity,
-    fingerprint, limitation, and epoch checks. If every canonical path exists even though
-    the previous fanout reported unresolved work, replay falls back to the complete lane
-    schedule so an invalid existing artifact can still be rebuilt inside the original
-    legal provider window.
+    If every publication validates even though the previous fanout reported unresolved
+    work, replay falls back to the complete lane schedule. No file or scheduling hint can
+    certify evidence; canonical provider and serialized transaction validation remain the
+    authority boundaries.
     """
 
     missing, present = _provider_lane_partition(
         request_path,
         acquisition=acquisition,
         decision_epoch=decision_epoch,
+        values=values,
     )
     return missing or (missing + present)
 
@@ -213,12 +218,12 @@ def _run_epoch_provider_fanout_with_bounded_replay(
     values: Mapping[str, str],
     decision_epoch: datetime,
 ) -> Mapping[str, object]:
-    """Prioritize missing work and replay once without extending the first budget.
+    """Prioritize unusable work and replay once without extending the first budget.
 
     The epoch-derived budget becomes one absolute monotonic window after the operational
     handoff/cleanup reserve is removed. The first pass preserves all scheduled lanes but
-    places absent exact-request publication paths first. A full production window reserves
-    a bounded suffix for the already-governed single replay; short windows preserve their
+    places unusable exact-request publications first. A full production window reserves a
+    bounded suffix for the already-governed single replay; short windows preserve their
     historical first-pass cap. Any replay temporarily narrows the acquisition module's
     existing 300-second ceiling to only the time left in that same window. The original
     module constants and canonical schedule are restored around every call, including
@@ -245,6 +250,7 @@ def _run_epoch_provider_fanout_with_bounded_replay(
         request_path,
         acquisition=acquisition,
         decision_epoch=decision_epoch,
+        values=resolved,
     )
     initial_lane_items = initial_missing + initial_present
     reports: list[Mapping[str, object]] = []
@@ -264,6 +270,7 @@ def _run_epoch_provider_fanout_with_bounded_replay(
                 request_path,
                 acquisition=acquisition,
                 decision_epoch=decision_epoch,
+                values=resolved,
             )
             initial_missing_publication_paths = len(missing_after_initial)
             if (
@@ -275,6 +282,7 @@ def _run_epoch_provider_fanout_with_bounded_replay(
                 request_path,
                 acquisition=acquisition,
                 decision_epoch=decision_epoch,
+                values=resolved,
             )
             replay_targeted_lanes = len(scheduled_override)
 
@@ -323,6 +331,7 @@ def _run_epoch_provider_fanout_with_bounded_replay(
         request_path,
         acquisition=acquisition,
         decision_epoch=decision_epoch,
+        values=resolved,
     )
     final.update(
         {
