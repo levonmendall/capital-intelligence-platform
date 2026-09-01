@@ -256,6 +256,32 @@ def test_public_lane_telemetry_rejects_authority_tampering(tmp_path) -> None:
     assert telemetry.load_public_lane_telemetry(values) is None
 
 
+def test_failed_lane_publishes_only_credential_safe_error_detail(tmp_path) -> None:
+    request = _request(tmp_path)
+    values = _values(tmp_path)
+    telemetry.record_lane_phase(
+        request,
+        values,
+        asset_class="international_equity",
+        index=4,
+        lane_started_at=_timestamp(0),
+        lane_failed_at=_timestamp(1),
+        error_type="ComprehensiveDiscoverySpoolError",
+        error_detail="provider publication produced no substantive signal",
+    )
+
+    public = telemetry.load_public_lane_telemetry(values)
+
+    assert public is not None
+    lane = public["lanes"][0]
+    assert lane["error_type"] == "ComprehensiveDiscoverySpoolError"
+    assert lane["error_detail"] == (
+        "provider publication produced no substantive signal"
+    )
+    assert public["credential_safe"] is True
+    assert public["advisory_only"] is True
+
+
 def test_cached_lane_records_canonical_hit_and_phase_transitions(monkeypatch, tmp_path) -> None:
     events: list[dict[str, object]] = []
     asset_class = CandidateAssetClass.US_EQUITY
@@ -350,3 +376,41 @@ def test_lane_telemetry_failure_is_fail_soft_for_canonical_transaction(
     )
 
     assert result == "canonical-result"
+
+
+def test_cached_lane_redacts_failure_detail_before_advisory_publication(
+    monkeypatch, tmp_path
+) -> None:
+    events: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        telemetry,
+        "record_lane_phase",
+        lambda _path, _values, *, asset_class, index, **updates: events.append(
+            {"asset_class": asset_class, "index": index, **updates}
+        ),
+    )
+
+    def fail(*_args, **_kwargs):
+        raise RuntimeError("provider rejected token secret-value")
+
+    monkeypatch.setattr(cached_lane, "_ORIGINAL_RUN_LANE_TRANSACTION", fail)
+    values = {
+        **_values(tmp_path),
+        "EODHD_API_TOKEN": "secret-value",
+    }
+
+    try:
+        cached_lane._run_lane_transaction(
+            _request(tmp_path),
+            values,
+            asset_class_value=CandidateAssetClass.INTERNATIONAL_EQUITY.value,
+            index=4,
+        )
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError("canonical failure was not preserved")
+
+    failed = next(event for event in events if "lane_failed_at" in event)
+    assert failed["error_type"] == "RuntimeError"
+    assert failed["error_detail"] == "provider rejected token [REDACTED]"
