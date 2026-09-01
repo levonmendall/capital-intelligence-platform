@@ -263,6 +263,13 @@ def install_post_public_provider_progress(values: Mapping[str, str] | None = Non
     Replaying the same request cannot advance the journal a second time.
     """
 
+    # The exact epoch provider child already calls this observer before provider acquisition.
+    # Install the child-local durable exchange checkpoint at that same narrow handoff.  The
+    # bootstrap self-checks sys.orig_argv, so normal evidence-owner calls remain observational.
+    from provider_preselection_checkpoint_bootstrap import install_for_epoch_provider_child
+
+    install_for_epoch_provider_child()
+
     import requests
 
     from operations.public_live_requirement_qualification import (
