@@ -5,12 +5,13 @@ qualification, and the certification DAG. Broad discovery also performs provider
 the evidence-owner process *between* the public-live gate and the first DAG journal. This
 module gives that otherwise invisible interval a credential-safe progress journal.
 
-Progress is work-unit native: only a newly completed provider request signature can advance
-the journal. Repeated retries of the same request therefore cannot act as a synthetic
-heartbeat and keep release certification alive indefinitely. Request material is never
-persisted; only an in-memory SHA-256 fingerprint is used for deduplication. A silent, stuck,
-or endlessly replayed provider operation remains subject to the unchanged parent stall
-budget.
+Progress is work-unit native. In-process requests advance only for newly completed request
+signatures. Provider work delegated to fresh subprocesses advances only when the parent
+observes a new atomic provider-publication promotion under the exact release spool. Repeated
+requests or unchanged publication files therefore cannot act as synthetic heartbeats and
+keep release certification alive indefinitely. Request material is never persisted; only
+in-memory fingerprints and bounded counters are used for deduplication. A silent, stuck, or
+endlessly replayed provider operation remains subject to the unchanged parent stall budget.
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ import json
 import os
 import re
 import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Mapping
@@ -28,10 +30,15 @@ from typing import Mapping
 
 _SCHEMA_VERSION = "evidence-preparation-progress.v1"
 _STAGE = "post-public-provider-io"
+_REQUEST_PROGRESS_SEMANTICS = "distinct-provider-request-work-units"
+_PUBLICATION_PROGRESS_SEMANTICS = "distinct-provider-publication-promotions"
 _SAFE_RELEASE = re.compile(r"[^A-Za-z0-9_.-]+")
 _LOCK = threading.Lock()
 _STRUCTURAL_PREWARM_LOCK = threading.Lock()
 _STRUCTURAL_PREWARM_STARTED = False
+_PUBLICATION_WATCH_LOCK = threading.Lock()
+_PUBLICATION_WATCH_STARTED = False
+_PUBLICATION_SCAN_SECONDS = 0.25
 
 
 def _release(values: Mapping[str, str]) -> str:
@@ -74,6 +81,18 @@ def _path(values: Mapping[str, str]) -> Path | None:
     )
 
 
+def _publication_root(values: Mapping[str, str]) -> Path | None:
+    data_dir = str(values.get("CAPITAL_INTELLIGENCE_DATA_DIR") or "").strip()
+    release_sha = _release(values)
+    if not data_dir or not release_sha or release_sha == "unknown":
+        return None
+    return (
+        Path(data_dir).expanduser()
+        / "comprehensive-discovery-spool"
+        / _safe_release(release_sha)
+    )
+
+
 def _safe_metrics(value: Mapping[str, int] | None) -> dict[str, int]:
     if value is None:
         return {}
@@ -109,19 +128,12 @@ def _request_fingerprint(args: tuple[object, ...], kwargs: Mapping[str, object])
     return hashlib.sha256(_canonical(material)).hexdigest()
 
 
-def record_evidence_preparation_progress(
+def _write_progress(
     values: Mapping[str, str],
     *,
-    completed_provider_calls: int,
+    semantics: str,
+    metrics: Mapping[str, int],
 ) -> Mapping[str, object] | None:
-    """Persist the count of distinct completed post-public provider work units."""
-
-    if (
-        isinstance(completed_provider_calls, bool)
-        or not isinstance(completed_provider_calls, int)
-        or completed_provider_calls < 1
-    ):
-        raise ValueError("completed_provider_calls must be a positive integer")
     path = _path(values)
     if path is None:
         return None
@@ -130,8 +142,8 @@ def record_evidence_preparation_progress(
         "release_sha": _release(values),
         "updated_at": datetime.now(timezone.utc).isoformat(),
         "stage": _STAGE,
-        "progress_semantics": "distinct-provider-request-work-units",
-        "metrics": {"provider_calls_completed": completed_provider_calls},
+        "progress_semantics": semantics,
+        "metrics": dict(metrics),
         "credential_safe": True,
         "decision_authority": False,
         "candidate_authority": False,
@@ -154,6 +166,46 @@ def record_evidence_preparation_progress(
         )
         os.replace(temporary, path)
     return payload
+
+
+def record_evidence_preparation_progress(
+    values: Mapping[str, str],
+    *,
+    completed_provider_calls: int,
+) -> Mapping[str, object] | None:
+    """Persist the count of distinct completed post-public provider request work units."""
+
+    if (
+        isinstance(completed_provider_calls, bool)
+        or not isinstance(completed_provider_calls, int)
+        or completed_provider_calls < 1
+    ):
+        raise ValueError("completed_provider_calls must be a positive integer")
+    return _write_progress(
+        values,
+        semantics=_REQUEST_PROGRESS_SEMANTICS,
+        metrics={"provider_calls_completed": completed_provider_calls},
+    )
+
+
+def record_provider_publication_progress(
+    values: Mapping[str, str],
+    *,
+    completed_provider_publications: int,
+) -> Mapping[str, object] | None:
+    """Persist distinct durable publication promotions observed across subprocesses."""
+
+    if (
+        isinstance(completed_provider_publications, bool)
+        or not isinstance(completed_provider_publications, int)
+        or completed_provider_publications < 1
+    ):
+        raise ValueError("completed_provider_publications must be a positive integer")
+    return _write_progress(
+        values,
+        semantics=_PUBLICATION_PROGRESS_SEMANTICS,
+        metrics={"provider_publications_completed": completed_provider_publications},
+    )
 
 
 def load_evidence_preparation_progress(
@@ -179,7 +231,10 @@ def load_evidence_preparation_progress(
     if str(payload.get("release_sha") or "").strip() != _release(values):
         return None
     semantics = str(payload.get("progress_semantics") or "").strip()
-    if semantics and semantics != "distinct-provider-request-work-units":
+    if semantics not in {
+        _REQUEST_PROGRESS_SEMANTICS,
+        _PUBLICATION_PROGRESS_SEMANTICS,
+    }:
         return None
     if payload.get("credential_safe") is not True:
         return None
@@ -207,13 +262,111 @@ def load_evidence_preparation_progress(
     metrics = _safe_metrics(
         payload.get("metrics") if isinstance(payload.get("metrics"), Mapping) else None
     )
-    if "provider_calls_completed" not in metrics:
+    required_metric = (
+        "provider_calls_completed"
+        if semantics == _REQUEST_PROGRESS_SEMANTICS
+        else "provider_publications_completed"
+    )
+    if required_metric not in metrics:
         return None
     return {
         **payload,
         "updated_at": updated_at.astimezone(timezone.utc).isoformat(),
         "metrics": metrics,
     }
+
+
+def _publication_snapshot(root: Path) -> dict[str, tuple[int, int, int]]:
+    """Return credential-safe identities for exact-release provider publication files."""
+
+    observed: dict[str, tuple[int, int, int]] = {}
+    try:
+        candidates = tuple(root.rglob("provider-preselection-*.json"))
+    except OSError:
+        return observed
+    for path in candidates:
+        try:
+            if not path.is_file() or path.is_symlink():
+                continue
+            stat = path.stat()
+            relative = path.relative_to(root).as_posix()
+        except (OSError, ValueError):
+            continue
+        observed[relative] = (int(stat.st_ino), int(stat.st_mtime_ns), int(stat.st_size))
+    return observed
+
+
+def _start_provider_publication_progress_watch(values: Mapping[str, str]) -> None:
+    """Observe atomic provider promotions performed by fresh acquisition subprocesses.
+
+    The U.S.-equity stage installs this watcher before starting the structural/provider
+    sidecar. The baseline therefore excludes old exact-release artifacts, and only a new or
+    replaced canonical publication can advance progress. File contents, request identity,
+    symbols, and provider material are never persisted by this journal.
+    """
+
+    global _PUBLICATION_WATCH_STARTED
+    root = _publication_root(values)
+    if root is None:
+        return
+    resolved = dict(values)
+    with _PUBLICATION_WATCH_LOCK:
+        if _PUBLICATION_WATCH_STARTED:
+            return
+        baseline = _publication_snapshot(root)
+        _PUBLICATION_WATCH_STARTED = True
+
+    def watch() -> None:
+        seen = dict(baseline)
+        completed = 0
+        while True:
+            time.sleep(_PUBLICATION_SCAN_SECONDS)
+            try:
+                from operations.public_live_requirement_qualification import (
+                    load_public_live_requirement_progress,
+                )
+
+                current = _publication_snapshot(root)
+                public = load_public_live_requirement_progress(resolved)
+                state = (
+                    str(public.get("state") or "").strip().lower()
+                    if isinstance(public, Mapping)
+                    else ""
+                )
+                pending = (
+                    int(public.get("pending_count") or 0)
+                    if isinstance(public, Mapping)
+                    else 0
+                )
+                failed = (
+                    int(public.get("failed_count") or 0)
+                    if isinstance(public, Mapping)
+                    else 0
+                )
+                if state != "qualified" or pending or failed:
+                    seen = current
+                    continue
+                changed = [
+                    name
+                    for name, identity in current.items()
+                    if seen.get(name) != identity
+                ]
+                seen = current
+                for _name in changed:
+                    completed += 1
+                    record_provider_publication_progress(
+                        resolved,
+                        completed_provider_publications=completed,
+                    )
+            except Exception:
+                # Supervision remains fail-closed if advisory progress cannot be observed.
+                pass
+
+    threading.Thread(
+        target=watch,
+        name="provider-publication-progress-watch",
+        daemon=True,
+    ).start()
 
 
 def _start_us_equity_structural_prewarm(values: Mapping[str, str]) -> None:
@@ -248,19 +401,16 @@ def _start_us_equity_structural_prewarm(values: Mapping[str, str]) -> None:
             return
         if handle.process is None:
             return
-        # The stage process does not exit until atexit handlers finish.  Reap the sidecar
-        # before the coordinator can launch comprehensive discovery, preserving the existing
-        # exclusive heavy/publication lane.  Any failure remains advisory and non-authoritative.
         atexit.register(handle.stop)
         _STRUCTURAL_PREWARM_STARTED = True
 
 
 def install_post_public_provider_progress(values: Mapping[str, str] | None = None) -> None:
-    """Observe distinct completed requests only after required public-live qualification.
+    """Observe genuine completed provider work after required public-live qualification.
 
-    The hook is installed only in the disposable evidence-owner process. Spawned DAG lane
-    workers start fresh interpreters and retain their existing lane-native progress path.
-    Replaying the same request cannot advance the journal a second time.
+    In-process requests retain their distinct-request hook. Fresh provider subprocesses are
+    observed through atomic exact-release publication promotions so their real progress is
+    visible to the unchanged parent watchdog without adding a second prewarm owner.
     """
 
     import requests
@@ -271,62 +421,61 @@ def install_post_public_provider_progress(values: Mapping[str, str] | None = Non
 
     resolved = dict(os.environ if values is None else values)
     current = requests.sessions.Session.request
-    if getattr(current, "_post_public_provider_progress", False):
-        return
-    completed = [0]
-    seen_work_units: set[str] = set()
-    count_lock = threading.Lock()
+    if not getattr(current, "_post_public_provider_progress", False):
+        completed = [0]
+        seen_work_units: set[str] = set()
+        count_lock = threading.Lock()
 
-    def request_with_progress(session, *args, **kwargs):
-        fingerprint = _request_fingerprint(tuple(args), kwargs)
-        try:
-            return current(session, *args, **kwargs)
-        finally:
-            # Observability must never alter the provider call's own result or exception.
+        def request_with_progress(session, *args, **kwargs):
+            fingerprint = _request_fingerprint(tuple(args), kwargs)
             try:
-                public = load_public_live_requirement_progress(resolved)
-                state = (
-                    str(public.get("state") or "").strip().lower()
-                    if isinstance(public, Mapping)
-                    else ""
-                )
-                pending = (
-                    int(public.get("pending_count") or 0)
-                    if isinstance(public, Mapping)
-                    else 0
-                )
-                failed = (
-                    int(public.get("failed_count") or 0)
-                    if isinstance(public, Mapping)
-                    else 0
-                )
-                if state == "qualified" and not pending and not failed:
-                    should_record = False
-                    observed = 0
-                    with count_lock:
-                        if fingerprint not in seen_work_units:
-                            seen_work_units.add(fingerprint)
-                            completed[0] += 1
-                            observed = completed[0]
-                            should_record = True
-                    if should_record:
-                        record_evidence_preparation_progress(
-                            resolved,
-                            completed_provider_calls=observed,
-                        )
-            except Exception:
-                # The journal is supervision-only. If it cannot advance, the unchanged
-                # parent watchdog remains fail-closed and will stop a genuinely silent run.
-                pass
+                return current(session, *args, **kwargs)
+            finally:
+                try:
+                    public = load_public_live_requirement_progress(resolved)
+                    state = (
+                        str(public.get("state") or "").strip().lower()
+                        if isinstance(public, Mapping)
+                        else ""
+                    )
+                    pending = (
+                        int(public.get("pending_count") or 0)
+                        if isinstance(public, Mapping)
+                        else 0
+                    )
+                    failed = (
+                        int(public.get("failed_count") or 0)
+                        if isinstance(public, Mapping)
+                        else 0
+                    )
+                    if state == "qualified" and not pending and not failed:
+                        should_record = False
+                        observed = 0
+                        with count_lock:
+                            if fingerprint not in seen_work_units:
+                                seen_work_units.add(fingerprint)
+                                completed[0] += 1
+                                observed = completed[0]
+                                should_record = True
+                        if should_record:
+                            record_evidence_preparation_progress(
+                                resolved,
+                                completed_provider_calls=observed,
+                            )
+                except Exception:
+                    pass
 
-    request_with_progress._post_public_provider_progress = True  # type: ignore[attr-defined]
-    requests.sessions.Session.request = request_with_progress
+        request_with_progress._post_public_provider_progress = True  # type: ignore[attr-defined]
+        requests.sessions.Session.request = request_with_progress
+
+    _start_provider_publication_progress_watch(resolved)
     # Structural prewarm has one explicit owner in the U.S.-equity stage runner. Progress
-    # instrumentation must remain observational and must not start a second sidecar.
+    # instrumentation remains observational and never starts a second sidecar.
 
 
 __all__ = [
     "install_post_public_provider_progress",
     "load_evidence_preparation_progress",
     "record_evidence_preparation_progress",
+    "record_provider_publication_progress",
 ]
