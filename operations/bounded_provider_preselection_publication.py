@@ -9,7 +9,10 @@ This module preserves the same catalog fingerprint, provider observations, facto
 crypto compatibility fallback, freshness rules, and paper-only authority contract while
 spooling normalized signals to SQLite and writing the canonical pretty-JSON shape one
 signal at a time. Exchange bulk snapshots are processed serially so no worker retains raw
-rows from multiple exchanges concurrently.
+rows from multiple exchanges concurrently. Transient exchange-bulk failures are retried
+only for the failed exchanges inside the same already-bounded provider child; successful
+exchange work remains in the disk-backed store, and persistent or entitlement failures
+remain explicit limitations that the exact-epoch publication owner refuses to promote.
 """
 
 from __future__ import annotations
@@ -18,6 +21,7 @@ import json
 import os
 import sqlite3
 import tempfile
+import time
 from collections.abc import Iterator, Mapping, Sequence
 from datetime import datetime
 from pathlib import Path
@@ -36,6 +40,8 @@ DiscoveryCatalogRecord = _core.DiscoveryCatalogRecord
 DiscoveryMarketFeatures = _core.DiscoveryMarketFeatures
 
 _SQLITE_CACHE_KIB = 2048
+_BULK_RETRY_ROUNDS = 2
+_BULK_RETRY_SLEEP_SECONDS = 0.5
 
 
 class _SignalStore:
@@ -298,6 +304,73 @@ def _insert_exchange_signals(
     return None
 
 
+def _bulk_error_retryable(error_detail: str) -> bool:
+    """Retry transient exchange acquisition, never entitlement failures."""
+
+    normalized = str(error_detail or "").strip().lower()
+    if not normalized:
+        return False
+    return not (
+        "entitlement is unavailable" in normalized
+        or "http 401" in normalized
+        or "http 403" in normalized
+    )
+
+
+def _collect_exchange_signals_with_retries(
+    store: _SignalStore,
+    *,
+    grouped: Mapping[str, Sequence[tuple[DiscoveryCatalogRecord, str]]],
+    as_of: datetime,
+    api_token: str,
+    http_get: Callable[..., Any],
+) -> tuple[str, ...]:
+    """Retry only failed exchanges without re-fetching successful exchange snapshots.
+
+    The provider child is still terminated by the existing exact-epoch fanout deadline, so
+    these retries cannot extend the 300-second acceleration ceiling or consume the 480-second
+    downstream reserve. An exchange is removed from the limitation set only after the same
+    canonical bulk collector succeeds; persistent and entitlement failures remain explicit.
+    """
+
+    pending = {str(exchange): tuple(members) for exchange, members in grouped.items()}
+    failures: dict[str, str] = {}
+
+    for round_index in range(_BULK_RETRY_ROUNDS + 1):
+        if not pending:
+            break
+        next_pending: dict[str, tuple[tuple[DiscoveryCatalogRecord, str], ...]] = {}
+        for exchange in sorted(pending):
+            error_detail = _insert_exchange_signals(
+                store,
+                exchange=exchange,
+                members=pending[exchange],
+                as_of=as_of,
+                api_token=api_token,
+                http_get=http_get,
+            )
+            if error_detail is None:
+                failures.pop(exchange, None)
+                continue
+            failures[exchange] = error_detail
+            if round_index < _BULK_RETRY_ROUNDS and _bulk_error_retryable(error_detail):
+                next_pending[exchange] = pending[exchange]
+
+        if next_pending and round_index < _BULK_RETRY_ROUNDS:
+            _runtime.record_manual_cio_diagnostic_progress(
+                "provider_preselection_bulk_retry",
+                metrics={
+                    "retry_round": round_index + 1,
+                    "failed_exchanges": len(next_pending),
+                },
+            )
+            store.commit()
+            time.sleep(_BULK_RETRY_SLEEP_SECONDS)
+        pending = next_pending
+
+    return tuple(failures[exchange] for exchange in sorted(failures))
+
+
 def _provider_features(
     records: Sequence[DiscoveryCatalogRecord],
     *,
@@ -510,17 +583,15 @@ def ensure_provider_preselection_publication(
                 "provider_preselection_bulk_snapshots",
                 metrics={"configured_exchanges": len(grouped)},
             )
-            for exchange in sorted(grouped):
-                error_detail = _insert_exchange_signals(
+            limitations.extend(
+                _collect_exchange_signals_with_retries(
                     store,
-                    exchange=exchange,
-                    members=grouped[exchange],
+                    grouped=grouped,
                     as_of=timestamp,
                     api_token=api_token,
                     http_get=http_get,
                 )
-                if error_detail is not None:
-                    limitations.append(error_detail)
+            )
             store.commit()
             _runtime.record_manual_cio_diagnostic_progress(
                 "provider_preselection_bulk_snapshots_complete",
