@@ -107,6 +107,7 @@ def test_installed_exchange_wrapper_durably_skips_completed_snapshot(monkeypatch
     original_store = publication._SignalStore
     original_insert = publication._insert_exchange_signals
     original_ensure = publication.ensure_provider_preselection_publication
+    had_installed = hasattr(publication, "_resumable_exchange_checkpoint_installed")
     original_installed = getattr(publication, "_resumable_exchange_checkpoint_installed", False)
     calls: list[str] = []
 
@@ -117,7 +118,7 @@ def test_installed_exchange_wrapper_durably_skips_completed_snapshot(monkeypatch
         return None
 
     monkeypatch.setattr(publication, "_insert_exchange_signals", fake_insert)
-    monkeypatch.setattr(publication, "_resumable_exchange_checkpoint_installed", False, raising=False)
+    publication._resumable_exchange_checkpoint_installed = False
     _install_publication_patch()
     wrapped_insert = publication._insert_exchange_signals
 
@@ -161,10 +162,7 @@ def test_installed_exchange_wrapper_durably_skips_completed_snapshot(monkeypatch
     publication._SignalStore = original_store
     publication._insert_exchange_signals = original_insert
     publication.ensure_provider_preselection_publication = original_ensure
-    if original_installed:
-        publication._resumable_exchange_checkpoint_installed = True
+    if had_installed:
+        publication._resumable_exchange_checkpoint_installed = original_installed
     else:
-        try:
-            delattr(publication, "_resumable_exchange_checkpoint_installed")
-        except AttributeError:
-            pass
+        delattr(publication, "_resumable_exchange_checkpoint_installed")
