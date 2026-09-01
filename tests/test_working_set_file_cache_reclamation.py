@@ -35,14 +35,31 @@ def test_small_working_set_crossing_is_reclaimable_when_active_file_explains_it(
     )
 
 
+def test_post_888_production_sized_crossing_does_not_require_extra_32mib_cushion():
+    boundaries = MemoryBoundaries(
+        working_set_kib=1_441_792,
+        raw_hard_kib=1_887_436,
+    )
+
+    # Production crossed by only 2,824 KiB. Active-file ownership need only explain that
+    # crossing; the caller remeasures the unchanged boundary after one bounded clean-file
+    # pass. The former extra 32 MiB classifier cushion incorrectly suppressed this attempt.
+    assert should_reclaim_file_backed_working_set(
+        _snapshot(working_set_kib=1_444_616, active_file_kib=8_192),
+        boundaries,
+    )
+
+
 def test_true_non_file_working_set_pressure_remains_fail_closed():
     boundaries = MemoryBoundaries(
         working_set_kib=1_441_792,
         raw_hard_kib=1_887_436,
     )
 
+    # Active-file ownership is smaller than the observed crossing, so the conservative
+    # non-file remainder itself is still at/above the governed boundary.
     assert not should_reclaim_file_backed_working_set(
-        _snapshot(working_set_kib=1_459_628, active_file_kib=20_000),
+        _snapshot(working_set_kib=1_459_628, active_file_kib=2_000),
         boundaries,
     )
 
@@ -72,8 +89,8 @@ def test_below_boundary_never_reclaims_even_with_large_active_file_cache():
 
 
 def test_production_wait_reclaims_file_backed_crossing_before_guard_decision(monkeypatch):
-    before = _snapshot(working_set_kib=1_459_628, active_file_kib=120_000)
-    after = _snapshot(working_set_kib=1_390_000, active_file_kib=50_000)
+    before = _snapshot(working_set_kib=1_444_616, active_file_kib=8_192)
+    after = _snapshot(working_set_kib=1_439_000, active_file_kib=2_500)
     snapshots = iter((before, after))
     released: list[dict[str, str]] = []
     observed: list[MemorySnapshot] = []
@@ -83,7 +100,7 @@ def test_production_wait_reclaims_file_backed_crossing_before_guard_decision(mon
     def fake_guard_wait(process, **kwargs):
         del process
         observed.append(guard.memory_snapshot(kwargs.get("values")))
-        return (0, False, False, 60_684, 1_670_436)
+        return (0, False, False, 60_840, 1_637_864)
 
     monkeypatch.setattr(guard, "wait_with_reclaimable_resource_bounds", fake_guard_wait)
     wait = bounded_watchdog._wait_with_resource_bounds
@@ -95,7 +112,7 @@ def test_production_wait_reclaims_file_backed_crossing_before_guard_decision(mon
             "supported": True,
             "scan_entries": 10,
             "released_file_count": 2,
-            "released_bytes": 80 * 1024 * 1024,
+            "released_bytes": 8 * 1024 * 1024,
         },
     )
 
@@ -108,13 +125,13 @@ def test_production_wait_reclaims_file_backed_crossing_before_guard_decision(mon
         poll_seconds=0.1,
     )
 
-    assert result == (0, False, False, 60_684, 1_670_436)
+    assert result == (0, False, False, 60_840, 1_637_864)
     assert released == [{"RENDER": "true"}]
     assert observed == [after]
 
 
 def test_production_wait_does_not_reclaim_true_non_file_pressure(monkeypatch):
-    before = _snapshot(working_set_kib=1_459_628, active_file_kib=20_000)
+    before = _snapshot(working_set_kib=1_459_628, active_file_kib=2_000)
     released: list[dict[str, str]] = []
     observed: list[MemorySnapshot] = []
 

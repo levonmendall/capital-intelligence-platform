@@ -7,16 +7,13 @@ non-file working set remains below the unchanged governed boundary.
 
 This helper does not reclaim memory and cannot change a resource boundary. It only answers
 whether one bounded clean-file reclamation pass is safe to attempt before the caller
-remeasures the same boundary. Missing accounting, true non-file pressure, and insufficient
-active-file ownership all remain non-reclaimable and fail closed.
+remeasures the exact same boundary. Missing accounting, true non-file pressure, and
+insufficient active-file ownership all remain non-reclaimable and fail closed.
 """
 
 from __future__ import annotations
 
 from typing import Protocol
-
-
-_RECLAIM_MARGIN_KIB = 32 * 1024
 
 
 class _Snapshot(Protocol):
@@ -31,15 +28,20 @@ class _Boundaries(Protocol):
 def should_reclaim_file_backed_working_set(
     snapshot: _Snapshot,
     boundaries: _Boundaries,
-    *,
-    margin_kib: int = _RECLAIM_MARGIN_KIB,
 ) -> bool:
     """Return true only when active file cache can explain the boundary crossing.
 
     ``working_set - active_file`` is a conservative non-file remainder because any kernel
-    memory and every anonymous page remain in that remainder. The optional margin requires
-    enough active-file ownership to clear the observed overage plus a small safety reserve,
-    preventing repeated reclamation for a crossing that file cache cannot plausibly fix.
+    memory and every anonymous page remain in that remainder. A reclaim attempt is allowed
+    only when that remainder is still below the unchanged governed boundary and active file
+    cache is at least as large as the observed overage. The caller still remeasures the
+    original boundary immediately after one bounded clean-file pass, so an ineffective
+    advisory reclaim cannot make unsafe memory pass.
+
+    Earlier code additionally required 32 MiB of active-file ownership beyond the actual
+    crossing. That classification-only cushion was not a governed memory limit and could
+    suppress reclamation for the production-sized small crossings this helper exists to
+    distinguish from genuine anonymous/non-file pressure.
     """
 
     working = snapshot.working_set_kib
@@ -56,8 +58,7 @@ def should_reclaim_file_backed_working_set(
 
     overage = working - boundary
     non_file_working = max(0, working - active_file)
-    required_file_cache = overage + max(0, int(margin_kib))
-    return non_file_working < boundary and active_file >= required_file_cache
+    return non_file_working < boundary and active_file >= overage
 
 
 __all__ = ["should_reclaim_file_backed_working_set"]
