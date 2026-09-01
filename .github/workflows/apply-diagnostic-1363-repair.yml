@@ -1,0 +1,123 @@
+name: Apply diagnostic 1363 publication durability repair
+
+on:
+  push:
+    branches:
+      - repair/diagnostic-1363-publication-readback
+
+permissions:
+  contents: write
+
+jobs:
+  apply-repair:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: repair/diagnostic-1363-publication-readback
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply fail-closed publication durability repair
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              target = Path(path)
+              text = target.read_text(encoding='utf-8')
+              if old not in text:
+                  raise SystemExit(f'expected repair anchor missing: {path}')
+              target.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          bounded = 'operations/bounded_provider_preselection_publication.py'
+          replace_once(
+              bounded,
+              '''def ensure_provider_preselection_publication(\n''',
+              '''def verify_provider_preselection_publication(\n    catalogs: Mapping[CandidateAssetClass, Sequence[DiscoveryCatalogRecord]],\n    *,\n    publication: ProviderPreselectionPublicationResult,\n    as_of: datetime,\n    policy: ComprehensiveMarketDiscoveryPolicy | None = None,\n    expected_path: str | Path | None = None,\n) -> ProviderPreselectionPublicationResult:\n    \"\"\"Re-open the exact publication and fail closed unless its durable shape survives.\"\"\"\n\n    timestamp = _core._aware(as_of, field_name=\"as_of\")\n    resolved = policy or ComprehensiveMarketDiscoveryPolicy()\n    records = _records_for_lane(catalogs)\n    if not records:\n        raise ProviderPreselectionPublicationError(\n            \"provider publication verification requires a nonempty catalog\"\n        )\n    fingerprint = _streaming_catalog_fingerprint(records)\n    path = (\n        Path(expected_path).expanduser()\n        if expected_path is not None\n        else _core._publication_path(resolved)\n    )\n    actual = Path(publication.path).expanduser()\n    if actual.resolve(strict=False) != path.resolve(strict=False):\n        raise ProviderPreselectionPublicationError(\n            \"bounded provider publication escaped its exact requested path\"\n        )\n    if path.is_symlink():\n        raise ProviderPreselectionPublicationError(\n            \"bounded provider publication exact path must not be a symlink\"\n        )\n    freshness_days = int(getattr(resolved, \"preselection_freshness_days\", 3))\n    verified = _existing_result_bounded(\n        path,\n        as_of=timestamp,\n        fingerprint=fingerprint,\n        catalog_count=len(records),\n        freshness_days=freshness_days,\n    )\n    if verified is None:\n        raise ProviderPreselectionPublicationError(\n            \"bounded provider publication failed durable exact-path readback verification\"\n        )\n    if int(publication.catalog_count) != len(records):\n        raise ProviderPreselectionPublicationError(\n            \"bounded provider publication catalog count changed before verification\"\n        )\n    if int(verified.signal_count) != int(publication.signal_count):\n        raise ProviderPreselectionPublicationError(\n            \"bounded provider publication signal count changed during durable readback\"\n        )\n    return verified\n\n\ndef ensure_provider_preselection_publication(\n'''
+          )
+          replace_once(
+              bounded,
+              '''        _atomic_stream_publication(path, metadata=metadata, store=store)\n        source_identifiers = tuple(store.iter_sources())\n        return ProviderPreselectionPublicationResult(\n            path=path,\n            available_at=timestamp,\n            catalog_count=len(records),\n            signal_count=store.signal_count,\n            reused=False,\n            source_identifiers=source_identifiers,\n            limitations=unique_limitations,\n        )\n''',
+              '''        _atomic_stream_publication(path, metadata=metadata, store=store)\n        source_identifiers = tuple(store.iter_sources())\n        result = ProviderPreselectionPublicationResult(\n            path=path,\n            available_at=timestamp,\n            catalog_count=len(records),\n            signal_count=store.signal_count,\n            reused=False,\n            source_identifiers=source_identifiers,\n            limitations=unique_limitations,\n        )\n        verify_provider_preselection_publication(\n            catalogs,\n            publication=result,\n            as_of=timestamp,\n            policy=resolved,\n            expected_path=path,\n        )\n        return result\n'''
+          )
+          replace_once(
+              bounded,
+              '''    \"ProviderPreselectionPublicationResult\",\n    \"ensure_provider_preselection_publication\",\n]''',
+              '''    \"ProviderPreselectionPublicationResult\",\n    \"ensure_provider_preselection_publication\",\n    \"verify_provider_preselection_publication\",\n]'''
+          )
+
+          lane = 'operations/transactional_comprehensive_discovery_lane.py'
+          replace_once(
+              lane,
+              '''        if state.get(\"scheduled\") is True:\n            publication = Path(str(state.get(\"provider_preselection_path\") or \"\"))\n''',
+              '''        if state.get(\"scheduled\") is True:\n            if state.get(\"provider_publication_verified\") is not True:\n                return None\n            publication = Path(str(state.get(\"provider_preselection_path\") or \"\"))\n'''
+          )
+          replace_once(
+              lane,
+              '''        publication_path: str | None = None\n        if scheduled:\n''',
+              '''        publication_path: str | None = None\n        publication_verified = False\n        publication_result: _publication.ProviderPreselectionPublicationResult | None = None\n        lane_policy = None\n        if scheduled:\n'''
+          )
+          replace_once(
+              lane,
+              '''                publication = _publication.ensure_provider_preselection_publication(\n                    {asset_class: merged},\n                    as_of=timestamp,\n                    policy=lane_policy,\n                    market_probe=core.default_provider_preselection_market_probe,\n                )\n            except _publication.ProviderPreselectionPublicationError as error:\n                raise _legacy.ComprehensiveDiscoverySpoolError(str(error)) from error\n            if int(getattr(publication, \"catalog_count\", -1)) != len(merged):\n                raise _legacy.ComprehensiveDiscoverySpoolError(\n                    f\"{asset_class.value} transactional provider publication count changed\"\n                )\n''',
+              '''                publication_result = _publication.ensure_provider_preselection_publication(\n                    {asset_class: merged},\n                    as_of=timestamp,\n                    policy=lane_policy,\n                    market_probe=core.default_provider_preselection_market_probe,\n                )\n                verified_publication = _publication.verify_provider_preselection_publication(\n                    {asset_class: merged},\n                    publication=publication_result,\n                    as_of=timestamp,\n                    policy=lane_policy,\n                    expected_path=publication_file,\n                )\n            except _publication.ProviderPreselectionPublicationError as error:\n                raise _legacy.ComprehensiveDiscoverySpoolError(\n                    f\"{asset_class.value} transactional provider publication failed; \"\n                    f\"failure_type={type(error).__name__}; detail={error}\"\n                ) from error\n            if int(getattr(verified_publication, \"catalog_count\", -1)) != len(merged):\n                raise _legacy.ComprehensiveDiscoverySpoolError(\n                    f\"{asset_class.value} transactional provider publication count changed\"\n                )\n            publication_verified = True\n'''
+          )
+          replace_once(
+              lane,
+              '''            \"provider_preselection_path\": publication_path,\n            \"peak_rss_bytes\": peak,\n''',
+              '''            \"provider_preselection_path\": publication_path,\n            \"provider_publication_verified\": publication_verified,\n            \"peak_rss_bytes\": peak,\n'''
+          )
+          replace_once(
+              lane,
+              '''            peak = max(peak, screening_peak)\n\n        transaction_state: dict[str, object] = {\n''',
+              '''            peak = max(peak, screening_peak)\n            if publication_result is None or lane_policy is None:\n                raise _legacy.ComprehensiveDiscoverySpoolError(\n                    f\"{asset_class.value} scheduled lane lost provider publication state\"\n                )\n            try:\n                _publication.verify_provider_preselection_publication(\n                    {asset_class: merged},\n                    publication=publication_result,\n                    as_of=timestamp,\n                    policy=lane_policy,\n                    expected_path=publication_path,\n                )\n            except _publication.ProviderPreselectionPublicationError as error:\n                raise _legacy.ComprehensiveDiscoverySpoolError(\n                    f\"{asset_class.value} provider publication failed pre-commit readback; \"\n                    f\"failure_type={type(error).__name__}; detail={error}\"\n                ) from error\n\n        transaction_state: dict[str, object] = {\n'''
+          )
+          replace_once(
+              lane,
+              '''            \"provider_preselection_path\": publication_path,\n            \"node\": dict(node_body) if isinstance(node_body, Mapping) else None,\n''',
+              '''            \"provider_preselection_path\": publication_path,\n            \"provider_publication_verified\": publication_verified,\n            \"node\": dict(node_body) if isinstance(node_body, Mapping) else None,\n'''
+          )
+
+          coordinator = 'operations/transactional_lane_comprehensive_discovery_coordinator.py'
+          replace_once(
+              coordinator,
+              '''    if str(state.get(\"asset_class\") or \"\") != asset_class:\n        raise _legacy.ComprehensiveDiscoverySpoolError(\n            f\"transactional lane identity changed for {asset_class}\"\n        )\n\n    # The lane child is fully gone''',
+              '''    if str(state.get(\"asset_class\") or \"\") != asset_class:\n        raise _legacy.ComprehensiveDiscoverySpoolError(\n            f\"transactional lane identity changed for {asset_class}\"\n        )\n    if state.get(\"scheduled\") is True:\n        if state.get(\"provider_publication_verified\") is not True:\n            raise _legacy.ComprehensiveDiscoverySpoolError(\n                f\"transactional scheduled lane lacks verified provider publication for {asset_class}\"\n            )\n        publication_path = Path(str(state.get(\"provider_preselection_path\") or \"\"))\n        if not publication_path.is_file() or publication_path.is_symlink():\n            raise _legacy.ComprehensiveDiscoverySpoolError(\n                f\"transactional scheduled lane provider publication is unavailable for {asset_class}\"\n            )\n\n    # The lane child is fully gone'''
+          )
+
+          tests = Path('tests/test_diagnostic_1363_publication_durability.py')
+          tests.write_text('''from __future__ import annotations\n\nfrom datetime import datetime, timezone\nfrom pathlib import Path\nfrom types import SimpleNamespace\n\nimport pytest\n\nfrom operations import bounded_provider_preselection_publication as publication\nfrom operations import comprehensive_discovery_input_spool as legacy\nfrom operations import transactional_comprehensive_discovery_lane as transaction\nfrom operations import transactional_lane_comprehensive_discovery_coordinator as coordinator\n\n\ndef test_bounded_publication_fails_when_atomic_artifact_does_not_survive_readback(monkeypatch, tmp_path: Path) -> None:\n    target = tmp_path / \"provider.json\"\n    candidate = SimpleNamespace(path=target, catalog_count=1, signal_count=1)\n    monkeypatch.setattr(publication, \"_records_for_lane\", lambda catalogs: (object(),))\n    monkeypatch.setattr(publication, \"_streaming_catalog_fingerprint\", lambda records: \"fp\")\n    monkeypatch.setattr(publication, \"_existing_result_bounded\", lambda *args, **kwargs: None)\n\n    with pytest.raises(\n        publication.ProviderPreselectionPublicationError,\n        match=\"durable exact-path readback verification\",\n    ):\n        publication.verify_provider_preselection_publication(\n            {object(): (object(),)},\n            publication=candidate,\n            as_of=datetime.now(timezone.utc),\n            policy=SimpleNamespace(preselection_freshness_days=3),\n            expected_path=target,\n        )\n\n\ndef test_transaction_resume_refuses_unverified_scheduled_publication(monkeypatch, tmp_path: Path) -> None:\n    request = tmp_path / \"request.json\"\n    request.write_text(\"{}\", encoding=\"utf-8\")\n    monkeypatch.setattr(\n        transaction._bounded,\n        \"_load_stage_state\",\n        lambda *args, **kwargs: {\n            \"schema_version\": transaction._TRANSACTION_SCHEMA,\n            \"transactional_lane_compaction\": True,\n            \"raw_catalog_persisted\": False,\n            \"request_id\": \"request-1\",\n            \"asset_class\": \"international_equity\",\n            \"blob\": {\"relative_path\": \"merged.pkl\"},\n            \"scheduled\": True,\n            \"provider_preselection_path\": str(tmp_path / \"provider.json\"),\n            \"provider_publication_verified\": False,\n        },\n    )\n\n    assert transaction._reusable_transaction_state(\n        request,\n        request_id=\"request-1\",\n        asset_class=\"international_equity\",\n        index=4,\n    ) is None\n\n\ndef test_parent_refuses_lane_completion_without_publication_proof(monkeypatch, tmp_path: Path) -> None:\n    class Process:\n        pid = 12345\n        def wait(self, timeout=None):\n            return 0\n        def poll(self):\n            return 0\n\n    state = {\n        \"schema_version\": transaction._TRANSACTION_SCHEMA,\n        \"transactional_lane_compaction\": True,\n        \"raw_catalog_persisted\": False,\n        \"asset_class\": \"international_equity\",\n        \"raw_record_count\": 1,\n        \"record_count\": 1,\n        \"peak_rss_bytes\": 1,\n        \"scheduled\": True,\n        \"provider_preselection_path\": str(tmp_path / \"missing-provider.json\"),\n        \"provider_publication_verified\": False,\n    }\n    monkeypatch.setattr(coordinator, \"_record_transaction_start\", lambda *args, **kwargs: None)\n    monkeypatch.setattr(coordinator, \"_remaining_epoch_seconds\", lambda **kwargs: 100.0)\n    monkeypatch.setattr(coordinator.subprocess, \"Popen\", lambda *args, **kwargs: Process())\n    monkeypatch.setattr(coordinator, \"_process_tree_alive\", lambda process: False)\n    monkeypatch.setattr(coordinator._bounded, \"_load_stage_state\", lambda *args, **kwargs: state)\n    monkeypatch.setattr(\n        coordinator,\n        \"_publish_transaction_completion\",\n        lambda **kwargs: (_ for _ in ()).throw(AssertionError(\"must not publish completion\")),\n    )\n\n    with pytest.raises(\n        legacy.ComprehensiveDiscoverySpoolError,\n        match=\"lacks verified provider publication\",\n    ):\n        coordinator._run_lane_transaction(\n            tmp_path / \"request.json\",\n            {},\n            asset_class=\"international_equity\",\n            index=4,\n            decision_epoch=datetime.now(timezone.utc),\n        )\n''', encoding='utf-8')
+
+          existing_test = 'tests/test_transactional_comprehensive_discovery_lanes.py'
+          replace_once(
+              existing_test,
+              '''        \"scheduled\": True,\n        \"provider_preselection_path\": str(publication),\n        \"node\": {\"lane_blob\": {\"relative_path\": \"lane.pkl\"}},\n''',
+              '''        \"scheduled\": True,\n        \"provider_preselection_path\": str(publication),\n        \"provider_publication_verified\": True,\n        \"node\": {\"lane_blob\": {\"relative_path\": \"lane.pkl\"}},\n'''
+          )
+          PY
+      - name: Compile repaired modules
+        run: |
+          python -m py_compile \
+            operations/bounded_provider_preselection_publication.py \
+            operations/transactional_comprehensive_discovery_lane.py \
+            operations/transactional_lane_comprehensive_discovery_coordinator.py \
+            tests/test_diagnostic_1363_publication_durability.py
+      - name: Run focused regressions
+        run: |
+          python -m pytest -q \
+            tests/test_diagnostic_1363_publication_durability.py \
+            tests/test_transactional_comprehensive_discovery_lanes.py \
+            tests/test_transactional_lane_comprehensive_discovery_coordinator.py
+      - name: Commit repaired source and remove one-shot workflow
+        shell: bash
+        run: |
+          rm .github/workflows/apply-diagnostic-1363-repair.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Fail closed on incomplete provider publication durability"
+          git push origin HEAD:repair/diagnostic-1363-publication-readback
