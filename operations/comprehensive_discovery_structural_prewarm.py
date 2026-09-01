@@ -249,6 +249,7 @@ def _run_epoch_provider_fanout_with_bounded_replay(
     initial_lane_items = initial_missing + initial_present
     reports: list[Mapping[str, object]] = []
     replay_targeted_lanes: int | None = None
+    initial_missing_publication_paths: int | None = None
     attempt_caps: list[float] = []
 
     for attempt in range(_PROVIDER_REPLAY_LIMIT + 1):
@@ -257,7 +258,18 @@ def _run_epoch_provider_fanout_with_bounded_replay(
         if attempt == 0:
             scheduled_override = initial_lane_items
         else:
-            if not reports or _unresolved_provider_lanes(reports[-1]) <= 0 or remaining <= 0.0:
+            if not reports or remaining <= 0.0:
+                break
+            missing_after_initial, _present_after_initial = _provider_lane_partition(
+                request_path,
+                acquisition=acquisition,
+                decision_epoch=decision_epoch,
+            )
+            initial_missing_publication_paths = len(missing_after_initial)
+            if (
+                _unresolved_provider_lanes(reports[-1]) <= 0
+                and not missing_after_initial
+            ):
                 break
             scheduled_override = _provider_replay_lane_items(
                 request_path,
@@ -307,6 +319,11 @@ def _run_epoch_provider_fanout_with_bounded_replay(
     if len(reports) == 1:
         return final
 
+    final_missing, _final_present = _provider_lane_partition(
+        request_path,
+        acquisition=acquisition,
+        decision_epoch=decision_epoch,
+    )
     final.update(
         {
             "provider_replay_attempted": True,
@@ -315,6 +332,10 @@ def _run_epoch_provider_fanout_with_bounded_replay(
             "provider_replay_targeted_lanes": replay_targeted_lanes,
             "provider_replay_initial_unresolved": _unresolved_provider_lanes(reports[0]),
             "provider_replay_final_unresolved": _unresolved_provider_lanes(reports[-1]),
+            "provider_replay_initial_missing_publication_paths": int(
+                initial_missing_publication_paths or 0
+            ),
+            "provider_replay_final_missing_publication_paths": len(final_missing),
             "provider_replay_initial_budget_seconds": round(initial_budget, 3),
             "provider_replay_reserved_seconds": round(replay_reserve, 3),
             "provider_replay_first_attempt_cap_seconds": round(
