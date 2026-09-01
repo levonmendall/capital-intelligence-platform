@@ -18,17 +18,19 @@ The early owner may make one bounded replay when its first fanout leaves unresol
 The replay consumes only time left inside the first fanout's original absolute acquisition
 window and reconstructs work in fresh finite children, so a transient provider or child
 failure cannot strand an otherwise valid exact-epoch publication while no failed attempt's
-heavy object graph is retained. When an exact-request publication is absent, replay targets
-that missing lane before already-published lanes; if no file-level gap can be identified,
-it falls back to the complete canonical lane schedule. The replay never extends or resets
-the provider budget.
+heavy object graph is retained. A small suffix of that same fixed window is reserved for the
+one replay so the first fanout cannot consume the entire legal provider window before an
+absent exact-request publication can be retried. When an exact-request publication is absent,
+replay targets that missing lane before already-published lanes; if no file-level gap can be
+identified, it falls back to the complete canonical lane schedule. The replay never extends
+or resets the provider budget.
 
 The later serialized comprehensive transaction still owns terminal screening,
 certification-node construction, market-evidence qualification, durable transaction state,
 and global certification. It may validate and consume an exact-epoch provider publication
 but must never start a second late provider-network fallback.
 
-The sidecar is advisory and bounded inside the same provider-acquisition window. It now
+The sidecar is advisory and bounded inside the same provider-acquisition window. It
 surrenders the window with a separate 30-second operational handoff margin, plus bounded
 cleanup time, before the unchanged 480-second downstream reserve is reached. That margin is
 for cache release, process exit, interpreter startup, and stage journal handoff only; it does
@@ -60,6 +62,8 @@ _EARLY_OWNER_RESERVE_SECONDS = (
     _OPERATIONAL_HANDOFF_MARGIN_SECONDS + _COMPLETION_CLEANUP_RESERVE_SECONDS
 )
 _PROVIDER_REPLAY_LIMIT = 1
+_PROVIDER_REPLAY_MAX_RESERVE_SECONDS = 45.0
+_PROVIDER_REPLAY_RESERVE_FRACTION = 0.25
 _REFERENCE_MANIFEST_ID_ENV = "CAPITAL_INTELLIGENCE_REFERENCE_MANIFEST_ID"
 _REFERENCE_MANIFEST_PATH_ENV = "CAPITAL_INTELLIGENCE_REFERENCE_MANIFEST_PATH"
 
@@ -117,8 +121,6 @@ def _provider_replay_lane_items(
     directory = Path(request_path).expanduser().parent
     missing: list[tuple[int, CandidateAssetClass]] = []
     for index, asset_class in lane_items:
-        # Mirrors transactional_comprehensive_discovery_lane._publication_path without
-        # importing that heavy canonical transaction stack into this lightweight sidecar.
         publication_path = directory / (
             f"provider-preselection-{index:03d}-{asset_class.value}.json"
         )
@@ -135,6 +137,18 @@ def _provider_replay_lane_items(
     return tuple(missing or lane_items)
 
 
+def _provider_replay_reserve_seconds(initial_budget: float) -> float:
+    """Reserve a bounded suffix of the same legal window for one targeted replay."""
+
+    budget = max(0.0, float(initial_budget))
+    if _PROVIDER_REPLAY_LIMIT < 1 or budget <= 0.0:
+        return 0.0
+    return min(
+        _PROVIDER_REPLAY_MAX_RESERVE_SECONDS,
+        budget * _PROVIDER_REPLAY_RESERVE_FRACTION,
+    )
+
+
 def _run_epoch_provider_fanout_with_bounded_replay(
     request_path: str | Path,
     *,
@@ -143,11 +157,13 @@ def _run_epoch_provider_fanout_with_bounded_replay(
 ) -> Mapping[str, object]:
     """Replay unresolved early provider work once without extending its first budget.
 
-    The first call's epoch-derived budget becomes one absolute monotonic window after the
-    operational handoff/cleanup reserve is removed. Any replay temporarily narrows the
-    acquisition module's existing 300-second ceiling to only the time left in that window.
-    The sidecar is a single-threaded finite process, and the original module constants and
-    canonical lane schedule are restored around every call, including failures.
+    The epoch-derived budget becomes one absolute monotonic window after the operational
+    handoff/cleanup reserve is removed. The first fanout is capped early enough to leave a
+    bounded suffix for the already-governed single replay. Any replay temporarily narrows
+    the acquisition module's existing 300-second ceiling to only the time left in that same
+    window. The sidecar is a single-threaded finite process, and the original module
+    constants and canonical lane schedule are restored around every call, including
+    failures.
     """
 
     from operations import epoch_scoped_provider_acquisition as acquisition
@@ -163,10 +179,12 @@ def _run_epoch_provider_fanout_with_bounded_replay(
         governed_budget = 0.0
         initial_budget = 0.0
     deadline = time.monotonic() + initial_budget
+    replay_reserve = _provider_replay_reserve_seconds(initial_budget)
     original_ceiling = float(acquisition._MAX_FANOUT_SECONDS)
     original_schedule = acquisition._scheduled_lane_items
     reports: list[Mapping[str, object]] = []
     replay_targeted_lanes: int | None = None
+    attempt_caps: list[float] = []
 
     for attempt in range(_PROVIDER_REPLAY_LIMIT + 1):
         remaining = max(0.0, deadline - time.monotonic())
@@ -181,9 +199,12 @@ def _run_epoch_provider_fanout_with_bounded_replay(
             )
             replay_targeted_lanes = len(replay_lane_items)
 
-        # A zero-budget first call intentionally preserves the acquisition owner's existing
-        # downstream-reserve report rather than inventing a different sidecar result.
-        cap = min(original_ceiling, remaining)
+        if attempt == 0 and replay_reserve > 0.0:
+            available = max(0.0, remaining - replay_reserve)
+        else:
+            available = remaining
+        cap = min(original_ceiling, available)
+        attempt_caps.append(cap)
         acquisition._MAX_FANOUT_SECONDS = cap
         if replay_lane_items is not None:
             acquisition._scheduled_lane_items = lambda _epoch: replay_lane_items
@@ -206,7 +227,21 @@ def _run_epoch_provider_fanout_with_bounded_replay(
             "failed": 0,
         }
     if len(reports) == 1:
-        return dict(reports[0])
+        final = dict(reports[0])
+        final.update(
+            {
+                "provider_replay_attempted": False,
+                "provider_replay_bounded": True,
+                "provider_replay_reserved_seconds": round(replay_reserve, 3),
+                "provider_replay_first_attempt_cap_seconds": round(
+                    attempt_caps[0] if attempt_caps else 0.0,
+                    3,
+                ),
+                "provider_prewarm_governed_budget_seconds": round(governed_budget, 3),
+                "provider_prewarm_initial_budget_seconds": round(initial_budget, 3),
+            }
+        )
+        return final
 
     final = dict(reports[-1])
     final.update(
@@ -218,6 +253,14 @@ def _run_epoch_provider_fanout_with_bounded_replay(
             "provider_replay_initial_unresolved": _unresolved_provider_lanes(reports[0]),
             "provider_replay_final_unresolved": _unresolved_provider_lanes(reports[-1]),
             "provider_replay_initial_budget_seconds": round(initial_budget, 3),
+            "provider_replay_reserved_seconds": round(replay_reserve, 3),
+            "provider_replay_first_attempt_cap_seconds": round(
+                attempt_caps[0] if attempt_caps else 0.0,
+                3,
+            ),
+            "provider_replay_attempt_caps_seconds": [
+                round(value, 3) for value in attempt_caps
+            ],
             "provider_replay_remaining_budget_seconds": round(
                 max(0.0, deadline - time.monotonic()),
                 3,
@@ -257,8 +300,6 @@ class StructuralPrewarmHandle:
         try:
             process.wait(timeout=_STOP_GRACE_SECONDS)
         except (OSError, subprocess.TimeoutExpired):
-            # Advisory work has no authority. The sidecar remains in the stage process
-            # group, so the existing stage supervisor is still the final kill wall.
             pass
 
     def finish(self) -> None:
@@ -304,9 +345,6 @@ def start_render_structural_prewarm(
         budget = float(_fanout_budget_seconds(timestamp, resolved))
     except (OSError, RuntimeError, TypeError, ValueError):
         budget = 0.0
-    # The child still applies the unchanged evidence lifetime, 300-second ceiling, and
-    # 480-second downstream reserve. The early owner stops sooner: bounded cleanup plus a
-    # 30-second operational handoff margin are subtracted from only its advisory window.
     usable_budget = max(0.0, budget - _EARLY_OWNER_RESERVE_SECONDS)
     deadline = time.monotonic() + usable_budget
 
@@ -327,8 +365,6 @@ def start_render_structural_prewarm(
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
-            # Keep the sidecar inside the existing stage process group. If freshness or
-            # resource supervision terminates the stage, this child dies with it.
             start_new_session=False,
         )
     except (OSError, ValueError):
@@ -410,8 +446,6 @@ def prewarm_structural_catalogs(
             ):
                 published += 1
         except (OSError, RuntimeError, TypeError, ValueError):
-            # Cache warming is advisory only. The bounded epoch provider owner will treat
-            # a missing structural input as a failed lane and cannot certify anything.
             pass
         finally:
             try:
@@ -435,13 +469,7 @@ def prewarm_epoch_provider_inputs(
     evidence_as_of: datetime,
     values: Mapping[str, str] | None = None,
 ) -> Mapping[str, object]:
-    """Acquire exact comprehensive provider prerequisites during the U.S.-equity window.
-
-    ``prepare_request`` is deterministic over release, epoch, state scope, exclusions, and
-    policy. Using the same default policy and empty comprehensive exclusions as the later
-    evidence-owner call therefore creates the exact request directory that
-    ``spawn_safe_acquire`` will reopen. No authority is transferred to this sidecar.
-    """
+    """Acquire exact comprehensive provider prerequisites during the U.S.-equity window."""
 
     resolved = dict(os.environ if values is None else values)
     timestamp = _aware(evidence_as_of, field_name="provider_prewarm_evidence_as_of")
@@ -482,8 +510,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         timestamp = datetime.fromisoformat(str(args.as_of).replace("Z", "+00:00"))
         prewarm_epoch_provider_inputs(evidence_as_of=timestamp)
     except (OSError, RuntimeError, TypeError, ValueError):
-        # The parent deliberately ignores this advisory process's status. Return nonzero
-        # for local observability without changing evidence qualification.
         return 2
     return 0
 
