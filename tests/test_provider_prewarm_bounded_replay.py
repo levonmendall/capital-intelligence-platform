@@ -117,6 +117,53 @@ def test_structural_skip_is_treated_as_unresolved_and_replayed(monkeypatch, tmp_
     assert result["provider_replay_final_unresolved"] == 0
 
 
+def test_missing_publication_path_replays_even_when_child_count_reports_complete(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    clock = SimpleNamespace(now=75.0)
+    calls = 0
+    missing_lane = ((0, SimpleNamespace(value="us_equity")),)
+
+    monkeypatch.setattr(overlap.time, "monotonic", lambda: clock.now)
+    monkeypatch.setattr(
+        acquisition,
+        "_fanout_budget_seconds",
+        lambda decision_epoch, values: 42.0,
+    )
+    monkeypatch.setattr(
+        overlap,
+        "_provider_lane_partition",
+        lambda *args, **kwargs: (missing_lane, ()),
+    )
+
+    def fake_fanout(request_path, *, values, decision_epoch):
+        nonlocal calls
+        calls += 1
+        clock.now += 1.0
+        return {
+            "attempted": True,
+            "scheduled_lanes": 1,
+            "completed": 1,
+            "failed": 0,
+            "provider_skipped_lanes": 0,
+        }
+
+    monkeypatch.setattr(acquisition, "run_provider_acquisition_fanout", fake_fanout)
+
+    result = overlap._run_epoch_provider_fanout_with_bounded_replay(
+        tmp_path / "request.json",
+        values={"RENDER": "true"},
+        decision_epoch=_as_of(),
+    )
+
+    assert calls == 2
+    assert result["provider_replay_attempted"] is True
+    assert result["provider_replay_initial_unresolved"] == 0
+    assert result["provider_replay_initial_missing_publication_paths"] == 1
+    assert result["provider_replay_final_missing_publication_paths"] == 1
+
+
 def test_replay_does_not_extend_exhausted_original_window(monkeypatch, tmp_path) -> None:
     clock = SimpleNamespace(now=200.0)
     calls = 0

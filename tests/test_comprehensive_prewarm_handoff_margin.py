@@ -19,6 +19,10 @@ def test_early_provider_owner_surrenders_operational_handoff_margin(monkeypatch,
         "provider_skipped_lanes": 0,
     }
     monkeypatch.setattr(acquisition, "_fanout_budget_seconds", lambda *args, **kwargs: 100.0)
+    # This test owns only the handoff-margin contract. Model the separate publication
+    # contract as already satisfied so the new missing-publication replay path does not
+    # turn this timing-only regression into a replay test.
+    monkeypatch.setattr(prewarm, "_provider_lane_partition", lambda *args, **kwargs: ((), ()))
 
     def fake_fanout(*args, **kwargs):
         del args, kwargs

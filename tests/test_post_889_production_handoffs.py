@@ -63,6 +63,15 @@ def test_bounded_fanout_uses_missing_first_on_first_pass(monkeypatch, tmp_path) 
     def fake_fanout(_request, *, values, decision_epoch):
         scheduled = tuple(acquisition._scheduled_lane_items(decision_epoch))
         observed.append(scheduled)
+        # A successful provider child must leave the exact-request publication behind.
+        # Model that contract here so this test stays focused on first-pass ordering;
+        # exit-0 with a missing publication is covered by the dedicated replay regression.
+        if lanes[1] in scheduled:
+            index, asset_class = lanes[1]
+            publication_path = (
+                tmp_path / f"provider-preselection-{index:03d}-{asset_class.value}.json"
+            )
+            publication_path.write_text("{}", encoding="utf-8")
         return {
             "attempted": True,
             "scheduled_lanes": len(scheduled),
