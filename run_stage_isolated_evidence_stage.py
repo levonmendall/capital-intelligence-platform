@@ -185,13 +185,12 @@ def _stage_public_live(values: dict[str, str], state) -> dict[str, object]:
         result = collector(state.evidence_as_of)
     if getattr(result, "required_sources_ready", None) is not True:
         raise RuntimeError("required public-live evidence did not qualify")
-    cache_reclamation = _post_public_live_cache_reclamation(values)
+    _post_public_live_cache_reclamation(values)
     return {
         "public_live_state": str(getattr(result, "state", "available")),
         "qualified_component_id": str(
             getattr(result, "qualified_component_id", "") or ""
         ),
-        "post_public_live_cache_reclamation": cache_reclamation,
     }
 
 
