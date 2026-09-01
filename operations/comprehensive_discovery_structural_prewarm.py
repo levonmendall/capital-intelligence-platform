@@ -234,21 +234,7 @@ def _run_epoch_provider_fanout_with_bounded_replay(
             "failed": 0,
         }
     if len(reports) == 1:
-        final = dict(reports[0])
-        final.update(
-            {
-                "provider_replay_attempted": False,
-                "provider_replay_bounded": True,
-                "provider_replay_reserved_seconds": round(replay_reserve, 3),
-                "provider_replay_first_attempt_cap_seconds": round(
-                    attempt_caps[0] if attempt_caps else 0.0,
-                    3,
-                ),
-                "provider_prewarm_governed_budget_seconds": round(governed_budget, 3),
-                "provider_prewarm_initial_budget_seconds": round(initial_budget, 3),
-            }
-        )
-        return final
+        return dict(reports[0])
 
     final = dict(reports[-1])
     final.update(
