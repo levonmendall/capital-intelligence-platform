@@ -89,9 +89,12 @@ def test_provider_first_pass_reserves_suffix_for_targeted_replay(monkeypatch, tm
     assert acquisition._DOWNSTREAM_RESERVE_SECONDS == 480.0
 
 
-def test_provider_replay_reserve_scales_down_for_short_legal_window():
+def test_provider_replay_reserve_preserves_short_window_contract():
     assert prewarm._provider_replay_reserve_seconds(0.0) == 0.0
-    assert prewarm._provider_replay_reserve_seconds(40.0) == 10.0
+    assert prewarm._provider_replay_reserve_seconds(40.0) == 0.0
+    assert prewarm._provider_replay_reserve_seconds(68.0) == 0.0
+    assert prewarm._provider_replay_reserve_seconds(179.999) == 0.0
+    assert prewarm._provider_replay_reserve_seconds(180.0) == 45.0
     assert prewarm._provider_replay_reserve_seconds(268.0) == 45.0
 
 
