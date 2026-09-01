@@ -62,18 +62,43 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          # The verifier normally completes within 240 x 15s (~60m), but an
-          # individual network read can otherwise outlive that logical retry
-          # budget. Give the polling subprocess its own hard wall-clock boundary
-          # so artifact upload and job cleanup still have time to run.
-          timeout --signal=TERM --kill-after=30s 56m \
-            python verify_render_cio_diagnostic.py \
-              --url "$AUDIT_URL" \
-              --expected-release "$EXPECTED_RELEASE" \
-              --output "$AUDIT_OUTPUT" \
-              --maximum-attempts 220 \
-              --interval-seconds 15 \
-            2>&1 | tee "$VERIFICATION_LOG"
+          : > "$VERIFICATION_LOG"
+
+          # Render can issue bounded replacement attempts for the same exact release.
+          # If this verifier adopted an active attempt and that attempt later fails,
+          # re-enter the canonical verifier instead of declaring the whole release
+          # terminal immediately. On re-entry the failed request is the baseline and
+          # the canonical verifier requires a new request_id within 45 x 15s (675s).
+          # Any other verifier error remains terminal and fail-closed.
+          for server_attempt in 1 2 3 4; do
+            attempt_log="/tmp/render-cio-diagnostic-verification-${server_attempt}.log"
+            set +e
+            timeout --signal=TERM --kill-after=30s 54m \
+              python verify_render_cio_diagnostic.py \
+                --url "$AUDIT_URL" \
+                --expected-release "$EXPECTED_RELEASE" \
+                --output "$AUDIT_OUTPUT" \
+                --maximum-attempts 220 \
+                --interval-seconds 15 \
+                --fresh-attempt-grace-attempts 45 \
+              2>&1 | tee "$attempt_log"
+            verifier_code=${PIPESTATUS[0]}
+            set -e
+            cat "$attempt_log" >> "$VERIFICATION_LOG"
+
+            if [[ "$verifier_code" -eq 0 ]]; then
+              exit 0
+            fi
+            if [[ "$server_attempt" -ge 4 ]]; then
+              exit "$verifier_code"
+            fi
+            if [[ "$verifier_code" -ne 3 ]] || \
+               ! grep -q 'current_diagnostic_failed:' "$attempt_log"; then
+              exit "$verifier_code"
+            fi
+
+            echo "::notice title=Render CIO diagnostic replacement::failed_server_attempt=${server_attempt} state=awaiting_replacement_attempt release_match=yes"
+          done
 
       - name: Upload redacted production diagnostic evidence
         if: always()
