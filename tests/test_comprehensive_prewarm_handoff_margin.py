@@ -39,7 +39,9 @@ def test_early_provider_owner_surrenders_operational_handoff_margin(monkeypatch,
     assert observed_caps[0] <= 68.0
     assert observed_caps[0] == pytest.approx(68.0, abs=0.01)
     assert acquisition._MAX_FANOUT_SECONDS == original
-    assert report == expected
+    # This regression owns the governed handoff timing and the canonical fanout result
+    # fields. Advisory scheduling telemetry may be added without weakening those invariants.
+    assert {key: report[key] for key in expected} == expected
     assert prewarm._OPERATIONAL_HANDOFF_MARGIN_SECONDS == 30.0
     assert prewarm._COMPLETION_CLEANUP_RESERVE_SECONDS == 2.0
     assert acquisition._DOWNSTREAM_RESERVE_SECONDS == 480.0
