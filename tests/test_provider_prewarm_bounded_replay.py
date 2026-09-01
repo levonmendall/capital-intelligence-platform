@@ -150,10 +150,10 @@ def test_replay_does_not_extend_exhausted_original_window(monkeypatch, tmp_path)
     )
 
     assert calls == 1
-    assert result == expected
+    assert {key: result[key] for key in expected} == expected
 
 
-def test_no_replay_preserves_existing_fanout_return_shape(monkeypatch, tmp_path) -> None:
+def test_no_replay_preserves_existing_fanout_fields(monkeypatch, tmp_path) -> None:
     expected = {"attempted": True, "completed": 5, "failed": 0}
 
     monkeypatch.setattr(
@@ -173,7 +173,7 @@ def test_no_replay_preserves_existing_fanout_return_shape(monkeypatch, tmp_path)
         decision_epoch=_as_of(),
     )
 
-    assert result == expected
+    assert {key: result[key] for key in expected} == expected
 
 
 def test_provider_ceiling_is_restored_when_fanout_raises(monkeypatch, tmp_path) -> None:

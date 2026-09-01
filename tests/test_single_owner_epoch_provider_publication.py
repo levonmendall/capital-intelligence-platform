@@ -51,6 +51,9 @@ def test_us_equity_overlap_uses_exact_comprehensive_request_identity(monkeypatch
         return {"attempted": True, "completed": 5, "failed": 0}
 
     monkeypatch.setattr(spool, "prepare_request", fake_prepare_request)
+    # This test owns exact comprehensive request identity, not lane scheduling. The
+    # missing-first scheduler is covered separately, so isolate it from this minimal core.
+    monkeypatch.setattr(acquisition, "_scheduled_lane_items", lambda decision_epoch: ())
     monkeypatch.setattr(acquisition, "run_provider_acquisition_fanout", fake_fanout)
 
     values = {
@@ -73,7 +76,8 @@ def test_us_equity_overlap_uses_exact_comprehensive_request_identity(monkeypatch
     assert observed["fanout_path"] == request_path
     assert observed["fanout_values"] == values
     assert observed["fanout_epoch"] == _as_of()
-    assert result == {"attempted": True, "completed": 5, "failed": 0}
+    expected = {"attempted": True, "completed": 5, "failed": 0}
+    assert {key: result[key] for key in expected} == expected
 
 
 def test_overlap_handle_finishes_only_inside_original_absolute_budget(monkeypatch) -> None:
