@@ -2,7 +2,7 @@
 
 This ledger complements the full point-in-time CIO evaluator by measuring whether
 pre-committee qualification rejected a company that subsequently outperformed
-cash.  It never feeds current returns back into the same decision and grants no
+cash. It never feeds current returns back into the same decision and grants no
 candidate, sizing, construction, execution, or policy authority.
 """
 
@@ -15,10 +15,13 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from math import exp, log1p
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Iterator, Mapping, Sequence
 
 from cio import CandidateDecisionRecord
 from opportunity import OpportunityQueue
+
+
+_DECISION_RESOLUTION_BATCH_SIZE = 128
 
 
 def _aware(value: datetime, *, field_name: str) -> datetime:
@@ -228,11 +231,10 @@ class SQLiteOpportunityOutcomeStore:
         material_edge: float = 0.01,
     ) -> int:
         timestamp = _aware(observed_at, field_name="observed_at")
-        outcomes = self._outcome_decision_ids()
         count = 0
-        for decision in self._decision_rows():
+        for decision in self._iter_decision_rows_bounded():
             candidate_identifier = str(decision["candidate_identifier"])
-            if candidate_identifier in outcomes:
+            if self._has_outcome(candidate_identifier):
                 continue
             decision_time = datetime.fromisoformat(str(decision["decision_as_of"]))
             elapsed = timestamp - decision_time
@@ -289,9 +291,53 @@ class SQLiteOpportunityOutcomeStore:
                     "execution_authority": False,
                 },
             )
-            outcomes.add(candidate_identifier)
             count += 1
         return count
+
+    def _iter_decision_rows_bounded(self) -> Iterator[dict[str, Any]]:
+        """Stream a stable decision snapshot without materializing historical ledgers."""
+        with self._connect() as connection:
+            upper = connection.execute(
+                f"SELECT MAX(sequence) AS sequence FROM {self._TABLE} WHERE event_type = 'screening_decision'"
+            ).fetchone()
+        if upper is None or upper["sequence"] is None:
+            return
+        upper_sequence = int(upper["sequence"])
+        last_sequence = 0
+        while last_sequence < upper_sequence:
+            with self._connect() as connection:
+                rows = connection.execute(
+                    f"""
+                    SELECT sequence, payload_json
+                    FROM {self._TABLE}
+                    WHERE event_type = 'screening_decision'
+                      AND sequence > ?
+                      AND sequence <= ?
+                    ORDER BY sequence
+                    LIMIT ?
+                    """,
+                    (last_sequence, upper_sequence, _DECISION_RESOLUTION_BATCH_SIZE),
+                ).fetchall()
+            if not rows:
+                return
+            for row in rows:
+                last_sequence = int(row["sequence"])
+                yield json.loads(str(row["payload_json"]))
+
+    def _has_outcome(self, candidate_identifier: str) -> bool:
+        prefix = f"screening-outcome:{candidate_identifier}:"
+        with self._connect() as connection:
+            row = connection.execute(
+                f"""
+                SELECT 1
+                FROM {self._TABLE}
+                WHERE event_type = 'screening_outcome'
+                  AND substr(event_identifier, 1, ?) = ?
+                LIMIT 1
+                """,
+                (len(prefix), prefix),
+            ).fetchone()
+        return row is not None
 
     def summary(self) -> OpportunityOutcomeSummary:
         decisions = self._decision_rows()
