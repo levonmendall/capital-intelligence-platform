@@ -521,6 +521,61 @@ def _atomic_stream_publication(
     temporary.replace(path)
 
 
+def verify_provider_preselection_publication(
+    catalogs: Mapping[CandidateAssetClass, Sequence[DiscoveryCatalogRecord]],
+    *,
+    publication: ProviderPreselectionPublicationResult,
+    as_of: datetime,
+    policy: ComprehensiveMarketDiscoveryPolicy | None = None,
+    expected_path: str | Path | None = None,
+) -> ProviderPreselectionPublicationResult:
+    """Re-open the exact publication and fail closed unless its durable shape survives."""
+
+    timestamp = _core._aware(as_of, field_name="as_of")
+    resolved = policy or ComprehensiveMarketDiscoveryPolicy()
+    records = _records_for_lane(catalogs)
+    if not records:
+        raise ProviderPreselectionPublicationError(
+            "provider publication verification requires a nonempty catalog"
+        )
+    fingerprint = _streaming_catalog_fingerprint(records)
+    path = (
+        Path(expected_path).expanduser()
+        if expected_path is not None
+        else _core._publication_path(resolved)
+    )
+    actual = Path(publication.path).expanduser()
+    if actual.resolve(strict=False) != path.resolve(strict=False):
+        raise ProviderPreselectionPublicationError(
+            "bounded provider publication escaped its exact requested path"
+        )
+    if path.is_symlink():
+        raise ProviderPreselectionPublicationError(
+            "bounded provider publication exact path must not be a symlink"
+        )
+    freshness_days = int(getattr(resolved, "preselection_freshness_days", 3))
+    verified = _existing_result_bounded(
+        path,
+        as_of=timestamp,
+        fingerprint=fingerprint,
+        catalog_count=len(records),
+        freshness_days=freshness_days,
+    )
+    if verified is None:
+        raise ProviderPreselectionPublicationError(
+            "bounded provider publication failed durable exact-path readback verification"
+        )
+    if int(publication.catalog_count) != len(records):
+        raise ProviderPreselectionPublicationError(
+            "bounded provider publication catalog count changed before verification"
+        )
+    if int(verified.signal_count) != int(publication.signal_count):
+        raise ProviderPreselectionPublicationError(
+            "bounded provider publication signal count changed during durable readback"
+        )
+    return verified
+
+
 def ensure_provider_preselection_publication(
     catalogs: Mapping[CandidateAssetClass, Sequence[DiscoveryCatalogRecord]],
     *,
@@ -673,7 +728,7 @@ def ensure_provider_preselection_publication(
         }
         _atomic_stream_publication(path, metadata=metadata, store=store)
         source_identifiers = tuple(store.iter_sources())
-        return ProviderPreselectionPublicationResult(
+        result = ProviderPreselectionPublicationResult(
             path=path,
             available_at=timestamp,
             catalog_count=len(records),
@@ -682,10 +737,19 @@ def ensure_provider_preselection_publication(
             source_identifiers=source_identifiers,
             limitations=unique_limitations,
         )
+        verify_provider_preselection_publication(
+            catalogs,
+            publication=result,
+            as_of=timestamp,
+            policy=resolved,
+            expected_path=path,
+        )
+        return result
 
 
 __all__ = [
     "ProviderPreselectionPublicationError",
     "ProviderPreselectionPublicationResult",
     "ensure_provider_preselection_publication",
+    "verify_provider_preselection_publication",
 ]

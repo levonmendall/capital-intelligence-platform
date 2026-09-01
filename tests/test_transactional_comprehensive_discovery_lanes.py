@@ -56,6 +56,7 @@ def test_transaction_resume_requires_retained_artifacts_to_verify(monkeypatch, t
         "blob": {"relative_path": "merged.pkl"},
         "scheduled": True,
         "provider_preselection_path": str(publication),
+        "provider_publication_verified": True,
         "node": {"lane_blob": {"relative_path": "lane.pkl"}},
     }
     verified: list[str] = []

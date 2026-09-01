@@ -295,6 +295,16 @@ def _run_lane_transaction(
         raise _legacy.ComprehensiveDiscoverySpoolError(
             f"transactional lane identity changed for {asset_class}"
         )
+    if state.get("scheduled") is True:
+        if state.get("provider_publication_verified") is not True:
+            raise _legacy.ComprehensiveDiscoverySpoolError(
+                f"transactional scheduled lane lacks verified provider publication for {asset_class}"
+            )
+        publication_path = Path(str(state.get("provider_preselection_path") or ""))
+        if not publication_path.is_file() or publication_path.is_symlink():
+            raise _legacy.ComprehensiveDiscoverySpoolError(
+                f"transactional scheduled lane provider publication is unavailable for {asset_class}"
+            )
 
     # The lane child is fully gone and the compact transaction checkpoint above has been
     # integrity-validated. The established post-lane hook first advises only the exact
