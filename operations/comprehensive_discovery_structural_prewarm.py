@@ -18,12 +18,13 @@ The early owner may make one bounded replay when its first fanout leaves unresol
 The replay consumes only time left inside the first fanout's original absolute acquisition
 window and reconstructs work in fresh finite children, so a transient provider or child
 failure cannot strand an otherwise valid exact-epoch publication while no failed attempt's
-heavy object graph is retained. A small suffix of that same fixed window is reserved for the
-one replay so the first fanout cannot consume the entire legal provider window before an
-absent exact-request publication can be retried. When an exact-request publication is absent,
-replay targets that missing lane before already-published lanes; if no file-level gap can be
-identified, it falls back to the complete canonical lane schedule. The replay never extends
-or resets the provider budget.
+heavy object graph is retained. On a full production acquisition window, a small suffix of
+that same fixed window is reserved for the one replay so the first fanout cannot consume the
+entire legal provider window before an absent exact-request publication can be retried. Short
+windows preserve their existing first-pass budget instead of being fragmented. When an
+exact-request publication is absent, replay targets that missing lane before already-
+published lanes; if no file-level gap can be identified, it falls back to the complete
+canonical lane schedule. The replay never extends or resets the provider budget.
 
 The later serialized comprehensive transaction still owns terminal screening,
 certification-node construction, market-evidence qualification, durable transaction state,
@@ -64,6 +65,9 @@ _EARLY_OWNER_RESERVE_SECONDS = (
 _PROVIDER_REPLAY_LIMIT = 1
 _PROVIDER_REPLAY_MAX_RESERVE_SECONDS = 45.0
 _PROVIDER_REPLAY_RESERVE_FRACTION = 0.25
+_PROVIDER_REPLAY_MIN_WINDOW_SECONDS = (
+    _PROVIDER_REPLAY_MAX_RESERVE_SECONDS / _PROVIDER_REPLAY_RESERVE_FRACTION
+)
 _REFERENCE_MANIFEST_ID_ENV = "CAPITAL_INTELLIGENCE_REFERENCE_MANIFEST_ID"
 _REFERENCE_MANIFEST_PATH_ENV = "CAPITAL_INTELLIGENCE_REFERENCE_MANIFEST_PATH"
 
@@ -138,10 +142,13 @@ def _provider_replay_lane_items(
 
 
 def _provider_replay_reserve_seconds(initial_budget: float) -> float:
-    """Reserve a bounded suffix of the same legal window for one targeted replay."""
+    """Reserve replay time only when the legal window is large enough to preserve first pass."""
 
     budget = max(0.0, float(initial_budget))
-    if _PROVIDER_REPLAY_LIMIT < 1 or budget <= 0.0:
+    if (
+        _PROVIDER_REPLAY_LIMIT < 1
+        or budget < _PROVIDER_REPLAY_MIN_WINDOW_SECONDS
+    ):
         return 0.0
     return min(
         _PROVIDER_REPLAY_MAX_RESERVE_SECONDS,
@@ -158,12 +165,12 @@ def _run_epoch_provider_fanout_with_bounded_replay(
     """Replay unresolved early provider work once without extending its first budget.
 
     The epoch-derived budget becomes one absolute monotonic window after the operational
-    handoff/cleanup reserve is removed. The first fanout is capped early enough to leave a
-    bounded suffix for the already-governed single replay. Any replay temporarily narrows
-    the acquisition module's existing 300-second ceiling to only the time left in that same
-    window. The sidecar is a single-threaded finite process, and the original module
-    constants and canonical lane schedule are restored around every call, including
-    failures.
+    handoff/cleanup reserve is removed. A full production window leaves a bounded suffix for
+    the already-governed single replay; a short window preserves its historical first-pass
+    cap. Any replay temporarily narrows the acquisition module's existing 300-second ceiling
+    to only the time left in that same window. The sidecar is a single-threaded finite
+    process, and the original module constants and canonical lane schedule are restored
+    around every call, including failures.
     """
 
     from operations import epoch_scoped_provider_acquisition as acquisition
