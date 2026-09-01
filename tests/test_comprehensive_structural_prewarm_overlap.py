@@ -34,6 +34,9 @@ def test_render_structural_prewarm_stays_in_stage_process_group(monkeypatch, tmp
         observed.update(kwargs)
         return fake_process
 
+    # Cache reclamation is covered independently. This test owns only the sidecar's process
+    # group contract, so isolate the pre-launch handoff before monkeypatching subprocess.Popen.
+    monkeypatch.setattr(prewarm, "_release_pre_us_equity_file_cache", lambda values: None)
     monkeypatch.setattr(prewarm.subprocess, "Popen", fake_popen)
     handle = prewarm.start_render_structural_prewarm(
         evidence_as_of=_as_of(),

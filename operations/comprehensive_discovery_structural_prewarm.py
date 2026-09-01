@@ -14,17 +14,20 @@ stage will use, then delegates structural preparation and provider I/O to the ex
 300-second acceleration ceiling, six-worker cap, evidence lifetime, and 480-second downstream
 reserve. Provider children atomically promote only clean, limitation-free publications.
 
-The early owner may make one bounded replay when its first fanout leaves unresolved lanes.
-The replay consumes only time left inside the first fanout's original absolute acquisition
-window and reconstructs work in fresh finite children, so a transient provider or child
-failure cannot strand an otherwise valid exact-epoch publication while no failed attempt's
-heavy object graph is retained. On a full production acquisition window, a small suffix of
-that same fixed window is reserved for the one replay so the first fanout cannot consume the
-entire legal provider window before an absent exact-request publication can be retried. Short
-windows preserve their existing first-pass budget instead of being fragmented. When an
-exact-request publication is absent, replay targets that missing lane before already-
-published lanes; if no file-level gap can be identified, it falls back to the complete
-canonical lane schedule. The replay never extends or resets the provider budget.
+The early owner prioritizes absent exact-request publication paths on its first pass while
+preserving the complete scheduled lane set. This is only a scheduling hint: canonical
+provider children and the later transactional handoff still validate identity, fingerprint,
+limitations, and epoch compatibility. On a full production acquisition window, a bounded
+suffix of that same fixed window is reserved for the one replay so the first fanout cannot
+consume the entire legal provider window before an absent publication can be retried; short
+windows preserve their existing first-pass budget. If unresolved lanes remain, the replay
+targets still-missing paths first. Neither prioritization nor replay extends or resets the
+provider budget.
+
+The U.S.-equity handoff also releases bounded clean file-cache pages left by completed
+public-live work before starting the sidecar and discovery. That advisory reclamation runs in
+a disposable child, changes no resource boundary, and remains fail-soft; the unchanged stage
+resource supervisor still fails closed if working-set pressure remains unsafe.
 
 The later serialized comprehensive transaction still owns terminal screening,
 certification-node construction, market-evidence qualification, durable transaction state,
@@ -68,8 +71,14 @@ _PROVIDER_REPLAY_RESERVE_FRACTION = 0.25
 _PROVIDER_REPLAY_MIN_WINDOW_SECONDS = (
     _PROVIDER_REPLAY_MAX_RESERVE_SECONDS / _PROVIDER_REPLAY_RESERVE_FRACTION
 )
+_PRE_US_EQUITY_CACHE_RECLAMATION_TIMEOUT_SECONDS = 10.0
 _REFERENCE_MANIFEST_ID_ENV = "CAPITAL_INTELLIGENCE_REFERENCE_MANIFEST_ID"
 _REFERENCE_MANIFEST_PATH_ENV = "CAPITAL_INTELLIGENCE_REFERENCE_MANIFEST_PATH"
+_PRE_US_EQUITY_CACHE_RECLAMATION_CODE = """
+import os
+from operations.pre_comprehensive_cache_reclamation import release_pre_comprehensive_completed_stage_file_cache
+release_pre_comprehensive_completed_stage_file_cache(os.environ)
+""".strip()
 
 
 def _aware(value: datetime, *, field_name: str) -> datetime:
@@ -104,26 +113,25 @@ def _unresolved_provider_lanes(report: Mapping[str, object]) -> int:
     return max(failed, skipped, max(0, scheduled - completed))
 
 
-def _provider_replay_lane_items(
+def _provider_lane_partition(
     request_path: str | Path,
     *,
     acquisition,
     decision_epoch: datetime,
-) -> tuple[tuple[int, CandidateAssetClass], ...]:
-    """Prioritize absent exact-request publications without weakening later validation.
+) -> tuple[
+    tuple[tuple[int, CandidateAssetClass], ...],
+    tuple[tuple[int, CandidateAssetClass], ...],
+]:
+    """Partition scheduled lanes by exact-request publication file presence.
 
-    This is only a replay scheduling hint. A regular non-symlink file at the canonical
-    exact-request path is not treated as evidence or as a validated publication; the
-    provider child and later transactional lane still perform the existing integrity,
-    fingerprint, limitation, and epoch checks. If every canonical path exists even though
-    the previous fanout reported unresolved work, replay falls back to the complete lane
-    schedule so an invalid existing artifact can still be rebuilt inside the original
-    legal provider window.
+    File presence is only a scheduling hint. A present path receives no evidence authority;
+    canonical provider and transactional validation still decides whether it can be reused.
     """
 
     lane_items = tuple(acquisition._scheduled_lane_items(decision_epoch))
     directory = Path(request_path).expanduser().parent
     missing: list[tuple[int, CandidateAssetClass]] = []
+    present: list[tuple[int, CandidateAssetClass]] = []
     for index, asset_class in lane_items:
         publication_path = directory / (
             f"provider-preselection-{index:03d}-{asset_class.value}.json"
@@ -136,9 +144,52 @@ def _provider_replay_lane_items(
             )
         except OSError:
             ready_hint = False
-        if not ready_hint:
+        if ready_hint:
+            present.append((index, asset_class))
+        else:
             missing.append((index, asset_class))
-    return tuple(missing or lane_items)
+    return tuple(missing), tuple(present)
+
+
+def _provider_initial_lane_items(
+    request_path: str | Path,
+    *,
+    acquisition,
+    decision_epoch: datetime,
+) -> tuple[tuple[int, CandidateAssetClass], ...]:
+    """Run absent publication paths first without dropping any scheduled lane."""
+
+    missing, present = _provider_lane_partition(
+        request_path,
+        acquisition=acquisition,
+        decision_epoch=decision_epoch,
+    )
+    return missing + present
+
+
+def _provider_replay_lane_items(
+    request_path: str | Path,
+    *,
+    acquisition,
+    decision_epoch: datetime,
+) -> tuple[tuple[int, CandidateAssetClass], ...]:
+    """Target absent exact-request publications on bounded replay.
+
+    This is only a replay scheduling hint. A regular non-symlink file at the canonical
+    exact-request path is not treated as evidence or as a validated publication; the
+    provider child and later transactional lane still perform the existing integrity,
+    fingerprint, limitation, and epoch checks. If every canonical path exists even though
+    the previous fanout reported unresolved work, replay falls back to the complete lane
+    schedule so an invalid existing artifact can still be rebuilt inside the original
+    legal provider window.
+    """
+
+    missing, present = _provider_lane_partition(
+        request_path,
+        acquisition=acquisition,
+        decision_epoch=decision_epoch,
+    )
+    return missing or (missing + present)
 
 
 def _provider_replay_reserve_seconds(initial_budget: float) -> float:
@@ -162,15 +213,16 @@ def _run_epoch_provider_fanout_with_bounded_replay(
     values: Mapping[str, str],
     decision_epoch: datetime,
 ) -> Mapping[str, object]:
-    """Replay unresolved early provider work once without extending its first budget.
+    """Prioritize missing work and replay once without extending the first budget.
 
     The epoch-derived budget becomes one absolute monotonic window after the operational
-    handoff/cleanup reserve is removed. A full production window leaves a bounded suffix for
-    the already-governed single replay; a short window preserves its historical first-pass
-    cap. Any replay temporarily narrows the acquisition module's existing 300-second ceiling
-    to only the time left in that same window. The sidecar is a single-threaded finite
-    process, and the original module constants and canonical lane schedule are restored
-    around every call, including failures.
+    handoff/cleanup reserve is removed. The first pass preserves all scheduled lanes but
+    places absent exact-request publication paths first. A full production window reserves
+    a bounded suffix for the already-governed single replay; short windows preserve their
+    historical first-pass cap. Any replay temporarily narrows the acquisition module's
+    existing 300-second ceiling to only the time left in that same window. The original
+    module constants and canonical schedule are restored around every call, including
+    failures.
     """
 
     from operations import epoch_scoped_provider_acquisition as acquisition
@@ -189,22 +241,30 @@ def _run_epoch_provider_fanout_with_bounded_replay(
     replay_reserve = _provider_replay_reserve_seconds(initial_budget)
     original_ceiling = float(acquisition._MAX_FANOUT_SECONDS)
     original_schedule = acquisition._scheduled_lane_items
+    initial_missing, initial_present = _provider_lane_partition(
+        request_path,
+        acquisition=acquisition,
+        decision_epoch=decision_epoch,
+    )
+    initial_lane_items = initial_missing + initial_present
     reports: list[Mapping[str, object]] = []
     replay_targeted_lanes: int | None = None
     attempt_caps: list[float] = []
 
     for attempt in range(_PROVIDER_REPLAY_LIMIT + 1):
         remaining = max(0.0, deadline - time.monotonic())
-        replay_lane_items: tuple[tuple[int, CandidateAssetClass], ...] | None = None
-        if attempt > 0:
+        scheduled_override: tuple[tuple[int, CandidateAssetClass], ...] | None = None
+        if attempt == 0:
+            scheduled_override = initial_lane_items
+        else:
             if not reports or _unresolved_provider_lanes(reports[-1]) <= 0 or remaining <= 0.0:
                 break
-            replay_lane_items = _provider_replay_lane_items(
+            scheduled_override = _provider_replay_lane_items(
                 request_path,
                 acquisition=acquisition,
                 decision_epoch=decision_epoch,
             )
-            replay_targeted_lanes = len(replay_lane_items)
+            replay_targeted_lanes = len(scheduled_override)
 
         if attempt == 0 and replay_reserve > 0.0:
             available = max(0.0, remaining - replay_reserve)
@@ -213,8 +273,10 @@ def _run_epoch_provider_fanout_with_bounded_replay(
         cap = min(original_ceiling, available)
         attempt_caps.append(cap)
         acquisition._MAX_FANOUT_SECONDS = cap
-        if replay_lane_items is not None:
-            acquisition._scheduled_lane_items = lambda _epoch: replay_lane_items
+        if scheduled_override is not None:
+            acquisition._scheduled_lane_items = (
+                lambda _epoch, items=scheduled_override: items
+            )
         try:
             report = acquisition.run_provider_acquisition_fanout(
                 request_path,
@@ -233,10 +295,18 @@ def _run_epoch_provider_fanout_with_bounded_replay(
             "completed": 0,
             "failed": 0,
         }
-    if len(reports) == 1:
-        return dict(reports[0])
 
     final = dict(reports[-1])
+    final.update(
+        {
+            "provider_initial_missing_priority_count": len(initial_missing),
+            "provider_initial_present_count": len(initial_present),
+            "provider_initial_missing_prioritized": bool(initial_missing),
+        }
+    )
+    if len(reports) == 1:
+        return final
+
     final.update(
         {
             "provider_replay_attempted": True,
@@ -264,6 +334,30 @@ def _run_epoch_provider_fanout_with_bounded_replay(
         }
     )
     return final
+
+
+def _release_pre_us_equity_file_cache(values: Mapping[str, str]) -> None:
+    """Bound clean file-cache release after public-live and before U.S. discovery.
+
+    Render may not expose writable ``memory.reclaim`` to the service cgroup. This handoff
+    therefore uses the existing file-specific ``posix_fadvise`` reclaimer in a disposable
+    child. It changes no memory limit and has no authority over evidence or decisions.
+    """
+
+    try:
+        subprocess.run(
+            (sys.executable, "-c", _PRE_US_EQUITY_CACHE_RECLAMATION_CODE),
+            env=dict(values),
+            cwd=str(Path(__file__).resolve().parents[1]),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=_PRE_US_EQUITY_CACHE_RECLAMATION_TIMEOUT_SECONDS,
+            check=False,
+            start_new_session=False,
+        )
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        pass
 
 
 @dataclass(slots=True)
@@ -331,6 +425,8 @@ def start_render_structural_prewarm(
         timestamp = _aware(evidence_as_of, field_name="structural_prewarm_evidence_as_of")
     except ValueError:
         return StructuralPrewarmHandle()
+
+    _release_pre_us_equity_file_cache(resolved)
 
     from operations.epoch_scoped_provider_acquisition import _fanout_budget_seconds
 
