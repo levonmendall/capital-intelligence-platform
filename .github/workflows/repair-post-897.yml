@@ -18,6 +18,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Install focused test dependency
+        run: python -m pip install pytest
       - name: Apply repairs
         run: python scripts/apply_post_897_repair.py
       - name: Compile repaired modules
