@@ -22,6 +22,7 @@ from pathlib import Path
 from operations.composite_readiness import component_heartbeat_path
 from operations.heartbeat import WorkerHeartbeatStore
 from operations.storage_pressure import reclaim_from_environment
+from operations.manual_cio_diagnostic import latest_manual_cio_diagnostic
 from prime_release_cio_diagnostic import prime_release_diagnostic_request
 from run_render_service import prepare_render_environment, run_supervisor
 
@@ -32,6 +33,9 @@ _DEFAULT_RELEASE_DIAGNOSTIC_RETRY_SECONDS = 75.0
 _MAX_RELEASE_DIAGNOSTIC_RETRY_SECONDS = 600.0
 _DEFAULT_RELEASE_DIAGNOSTIC_AUDIT_REFRESH_SECONDS = 15.0
 _RESOURCE_LIMIT_RETURN_CODES = frozenset({125})
+_RELEASE_DIAGNOSTIC_LIFECYCLE_STARTED_AT_ENV = (
+    "CAPITAL_INTELLIGENCE_RELEASE_DIAGNOSTIC_LIFECYCLE_STARTED_AT"
+)
 
 
 def _enabled(values: MutableMapping[str, str], name: str, *, default: bool) -> bool:
@@ -268,6 +272,17 @@ def _run_release_diagnostic_after_readiness(
     not_before: datetime,
 ) -> None:
     diagnostic_values = _release_diagnostic_environment(values)
+    current_request = latest_manual_cio_diagnostic(values=diagnostic_values)
+    if current_request is not None and current_request.requested_by == (
+        f"render-release:{diagnostic_values.get('CAPITAL_INTELLIGENCE_RELEASE')}"
+    ):
+        diagnostic_values[_RELEASE_DIAGNOSTIC_LIFECYCLE_STARTED_AT_ENV] = (
+            current_request.requested_at.astimezone(timezone.utc).isoformat()
+        )
+    else:
+        diagnostic_values[_RELEASE_DIAGNOSTIC_LIFECYCLE_STARTED_AT_ENV] = (
+            datetime.now(timezone.utc).isoformat()
+        )
     _publish_release_diagnostic_audit(diagnostic_values)
     wait_seconds = _positive_float(
         values,

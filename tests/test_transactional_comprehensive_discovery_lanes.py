@@ -37,6 +37,8 @@ def test_transaction_resume_rejects_any_raw_catalog_retention(monkeypatch, tmp_p
             request_id="request-1",
             asset_class="international_equity",
             index=4,
+            decision_epoch=datetime.now(timezone.utc),
+            freshness_days=3,
         )
         is None
     )
@@ -71,16 +73,23 @@ def test_transaction_resume_requires_retained_artifacts_to_verify(monkeypatch, t
         "_verify_blob",
         lambda directory, descriptor: verified.append(descriptor.relative_path),
     )
+    monkeypatch.setattr(
+        transaction,
+        "verify_transaction_publication_state",
+        lambda *args, **kwargs: verified.append("provider.json"),
+    )
 
     loaded = transaction._reusable_transaction_state(
         request,
         request_id="request-1",
         asset_class="international_equity",
         index=4,
+        decision_epoch=datetime.now(timezone.utc),
+        freshness_days=3,
     )
 
     assert loaded is state
-    assert verified == ["merged.pkl", "lane.pkl"]
+    assert verified == ["merged.pkl", "provider.json", "lane.pkl"]
 
 
 def test_parent_reclaims_only_after_transaction_child_exit_and_before_completion(monkeypatch, tmp_path: Path) -> None:

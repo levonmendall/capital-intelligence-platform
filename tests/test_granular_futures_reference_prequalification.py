@@ -10,7 +10,10 @@ from operations.granular_futures_reference_prequalification import (
     GranularFuturesReferenceProvider,
     load_futures_reference_progress,
 )
-from operations.supervised_component_execution import SupervisedComponentTimeout
+from operations.supervised_component_execution import (
+    SupervisedComponentExecutionError,
+    SupervisedComponentTimeout,
+)
 from providers.massive_multi_asset import MassiveFuturesContract, MassiveMultiAssetError
 
 
@@ -258,3 +261,80 @@ def test_unit_timeout_configuration_is_fail_closed(tmp_path) -> None:
             as_of=AS_OF,
             product_codes=("ES",),
         )
+
+
+def test_failed_cme_venues_defer_all_roots_to_one_bounded_fallback_batch(tmp_path) -> None:
+    values = {
+        "CAPITAL_INTELLIGENCE_DATA_DIR": str(tmp_path),
+        "CAPITAL_INTELLIGENCE_RELEASE": "release-batched-fallback",
+        "CAPITAL_INTELLIGENCE_FUTURES_REFERENCE_UNIT_TIMEOUT_SECONDS": "45",
+        "CAPITAL_INTELLIGENCE_FUTURES_REFERENCE_FALLBACK_MAX_WORKERS": "3",
+    }
+    cme = _FakeCme()
+    primary_calls: list[str] = []
+    batches: list[tuple[tuple[str, ...], float, int]] = []
+
+    def failed_primary(*, component, operation, timeout_seconds, return_value):
+        del operation, timeout_seconds, return_value
+        primary_calls.append(component)
+        raise SupervisedComponentExecutionError(
+            f"{component} failed: MassiveMultiAssetError: CME returned HTTP 400",
+            remote_error_type="MassiveMultiAssetError",
+            status_code=400,
+            retryable=False,
+        )
+
+    def fallback_batch(*, components, timeout_seconds, maximum_parallel):
+        batches.append((tuple(components), timeout_seconds, maximum_parallel))
+        return {
+            "massive-root-CL": (_contract("CL", "CLZ6", source="massive:CL"),),
+            "massive-root-ES": (_contract("ES", "ESZ6", source="massive:ES"),),
+        }
+
+    provider = GranularFuturesReferenceProvider(
+        values=values,
+        cme_provider=cme,
+        massive_provider_factory=_FakeMassive,
+        component_runner=failed_primary,
+        batch_component_runner=fallback_batch,
+        clock=lambda: AS_OF,
+    )
+
+    rows = provider.futures_contracts(as_of=AS_OF, product_codes=("ES", "CL"))
+
+    assert {row.product_code for row in rows} == {"CL", "ES"}
+    assert primary_calls == ["cme-venue-cme", "cme-venue-nymex"]
+    assert batches == [(("massive-root-ES", "massive-root-CL"), 45.0, 3)]
+    progress = load_futures_reference_progress(values)
+    assert progress is not None and progress["state"] == "qualified"
+    cme_failures = [
+        unit for unit in progress["units"] if unit["provider"] == "cme_fprf"
+    ]
+    assert {unit["http_status"] for unit in cme_failures} == {400}
+    assert {unit["provider_error_type"] for unit in cme_failures} == {
+        "MassiveMultiAssetError"
+    }
+
+
+def test_fallback_worker_configuration_is_fail_closed(tmp_path) -> None:
+    values = {
+        "CAPITAL_INTELLIGENCE_DATA_DIR": str(tmp_path),
+        "CAPITAL_INTELLIGENCE_RELEASE": "release-invalid-workers",
+        "CAPITAL_INTELLIGENCE_FUTURES_REFERENCE_FALLBACK_MAX_WORKERS": "5",
+    }
+    cme = _FakeCme()
+
+    def failed_primary(**_kwargs):
+        raise SupervisedComponentTimeout("primary timed out")
+
+    provider = GranularFuturesReferenceProvider(
+        values=values,
+        cme_provider=cme,
+        massive_provider_factory=_FakeMassive,
+        component_runner=failed_primary,
+        batch_component_runner=lambda **_kwargs: {},
+        clock=lambda: AS_OF,
+    )
+
+    with pytest.raises(ValueError, match="must be between 1 and 4"):
+        provider.futures_contracts(as_of=AS_OF, product_codes=("ES", "CL"))

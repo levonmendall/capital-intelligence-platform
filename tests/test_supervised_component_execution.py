@@ -11,6 +11,7 @@ from operations.supervised_component_execution import (
     SupervisedComponentExecutionError,
     SupervisedComponentTimeout,
     run_supervised_component,
+    run_supervised_components,
 )
 
 
@@ -62,6 +63,40 @@ def test_supervised_component_hard_timeout_returns_control() -> None:
     elapsed = time.monotonic() - started
 
     assert elapsed < 2.0
+
+
+def test_supervised_component_preserves_safe_remote_failure_metadata() -> None:
+    class ProviderError(RuntimeError):
+        status_code = 403
+        retryable = False
+
+    outcomes = run_supervised_components(
+        components={"provider-root": lambda: (_ for _ in ()).throw(ProviderError("denied"))},
+        timeout_seconds=1.0,
+        maximum_parallel=1,
+    )
+
+    failure = outcomes["provider-root"]
+    assert isinstance(failure, SupervisedComponentExecutionError)
+    assert failure.remote_error_type == "ProviderError"
+    assert failure.status_code == 403
+    assert failure.retryable is False
+
+
+def test_supervised_component_batch_overlaps_independent_timeouts() -> None:
+    started = time.monotonic()
+    outcomes = run_supervised_components(
+        components={
+            f"hung-{index}": lambda: time.sleep(5.0)
+            for index in range(3)
+        },
+        timeout_seconds=0.05,
+        maximum_parallel=3,
+    )
+    elapsed = time.monotonic() - started
+
+    assert all(isinstance(outcome, SupervisedComponentTimeout) for outcome in outcomes.values())
+    assert elapsed < 1.0
 
 
 def test_reference_binding_reuses_original_cutoff_without_acquisition(
