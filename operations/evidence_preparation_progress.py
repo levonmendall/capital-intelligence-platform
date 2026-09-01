@@ -321,11 +321,8 @@ def install_post_public_provider_progress(values: Mapping[str, str] | None = Non
 
     request_with_progress._post_public_provider_progress = True  # type: ignore[attr-defined]
     requests.sessions.Session.request = request_with_progress
-    try:
-        _start_us_equity_structural_prewarm(resolved)
-    except Exception:
-        # Structural prewarm is acceleration only and must never change evidence behavior.
-        pass
+    # Structural prewarm has one explicit owner in the U.S.-equity stage runner. Progress
+    # instrumentation must remain observational and must not start a second sidecar.
 
 
 __all__ = [
