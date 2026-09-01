@@ -26,9 +26,24 @@ def test_initial_provider_pass_prioritizes_missing_publications_without_dropping
     )
     monkeypatch.setattr(acquisition, "_scheduled_lane_items", lambda _epoch: lanes)
 
-    for index, asset_class in (lanes[0], lanes[2]):
-        path = tmp_path / f"provider-preselection-{index:03d}-{asset_class.value}.json"
-        path.write_text("{}", encoding="utf-8")
+    reusable = {
+        CandidateAssetClass.US_EQUITY.value,
+        CandidateAssetClass.FX.value,
+    }
+
+    def validate(_request_path, *, values, asset_class_value, index):
+        del index
+        assert values[acquisition._REUSE_ONLY_ENV] == "true"
+        if asset_class_value not in reusable:
+            raise RuntimeError("exact-request publication is unavailable")
+        return {
+            "scheduled": True,
+            "asset_class": asset_class_value,
+            "publication_ready": True,
+            "reused": True,
+        }
+
+    monkeypatch.setattr(acquisition, "prepare_lane_provider_publication", validate)
 
     ordered = prewarm._provider_initial_lane_items(
         request,
@@ -54,24 +69,35 @@ def test_bounded_fanout_uses_missing_first_on_first_pass(monkeypatch, tmp_path) 
     monkeypatch.setattr(acquisition, "_scheduled_lane_items", original_schedule)
     monkeypatch.setattr(acquisition, "_fanout_budget_seconds", lambda *_args, **_kwargs: 120.0)
 
-    for index, asset_class in (lanes[0], lanes[2]):
-        path = tmp_path / f"provider-preselection-{index:03d}-{asset_class.value}.json"
-        path.write_text("{}", encoding="utf-8")
+    reusable = {
+        CandidateAssetClass.US_EQUITY.value,
+        CandidateAssetClass.FX.value,
+    }
+
+    def validate(_request_path, *, values, asset_class_value, index):
+        del index
+        assert values[acquisition._REUSE_ONLY_ENV] == "true"
+        if asset_class_value not in reusable:
+            raise RuntimeError("exact-request publication is unavailable")
+        return {
+            "scheduled": True,
+            "asset_class": asset_class_value,
+            "publication_ready": True,
+            "reused": True,
+        }
+
+    monkeypatch.setattr(acquisition, "prepare_lane_provider_publication", validate)
 
     observed = []
 
     def fake_fanout(_request, *, values, decision_epoch):
+        del values
         scheduled = tuple(acquisition._scheduled_lane_items(decision_epoch))
         observed.append(scheduled)
-        # A successful provider child must leave the exact-request publication behind.
-        # Model that contract here so this test stays focused on first-pass ordering;
-        # exit-0 with a missing publication is covered by the dedicated replay regression.
+        # Model successful canonical promotion for the missing lane. The scheduling
+        # regression now keys off reuse validation rather than mere file presence.
         if lanes[1] in scheduled:
-            index, asset_class = lanes[1]
-            publication_path = (
-                tmp_path / f"provider-preselection-{index:03d}-{asset_class.value}.json"
-            )
-            publication_path.write_text("{}", encoding="utf-8")
+            reusable.add(CandidateAssetClass.INTERNATIONAL_EQUITY.value)
         return {
             "attempted": True,
             "scheduled_lanes": len(scheduled),
