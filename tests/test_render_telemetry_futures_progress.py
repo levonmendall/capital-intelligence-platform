@@ -21,6 +21,8 @@ def test_render_telemetry_preserves_granular_futures_certification_dag() -> None
         "qualified_roots": ["ES"],
         "unresolved_roots": ["CL"],
         "active_unit": None,
+        "active_units": ["massive-root-CL"],
+        "fallback_max_workers": 3,
         "unit_timeout_seconds": 45.0,
         "blocking_unit": "massive-root-CL",
         "blocking_provider": "massive",
@@ -47,6 +49,9 @@ def test_render_telemetry_preserves_granular_futures_certification_dag() -> None
                 "failure_type": "timeout",
                 "duration_ms": 45000,
                 "fallback": True,
+                "provider_error_type": "MassiveMultiAssetError",
+                "http_status": 429,
+                "retryable": True,
             },
         ],
         "units": [
@@ -60,6 +65,9 @@ def test_render_telemetry_preserves_granular_futures_certification_dag() -> None
                 "duration_ms": 45000,
                 "failure_type": "timeout",
                 "fallback": True,
+                "provider_error_type": "MassiveMultiAssetError",
+                "http_status": 429,
+                "retryable": True,
             }
         ],
         "credential_safe": True,
@@ -102,6 +110,11 @@ def test_render_telemetry_preserves_granular_futures_certification_dag() -> None
     assert progress["blocking_venue"] == "NYMEX"
     assert progress["blocking_root"] == "CL"
     assert progress["blocking_failure_type"] == "timeout"
+    assert progress["active_units"] == ["massive-root-CL"]
+    assert progress["fallback_max_workers"] == 3
+    assert progress["nodes"][1]["provider_error_type"] == "MassiveMultiAssetError"
+    assert progress["nodes"][1]["http_status"] == 429
+    assert progress["nodes"][1]["retryable"] is True
     assert progress["nodes"][1]["state"] == "timed-out"
     assert diagnostic["prequalification_failure_unit"] == "massive-root-CL"
     assert diagnostic["prequalification_failure_venue"] == "NYMEX"

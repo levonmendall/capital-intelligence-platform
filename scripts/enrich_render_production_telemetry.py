@@ -192,6 +192,10 @@ def _safe_futures_reference_progress(value: object) -> dict[str, object] | None:
             if root is None:
                 continue
             duration_ms = _nonnegative_int(item.get("duration_ms"))
+            http_status = _nonnegative_int(item.get("http_status"))
+            if http_status is not None and not 100 <= http_status <= 599:
+                http_status = None
+            retryable = item.get("retryable")
             nodes.append(
                 {
                     "root": root,
@@ -202,6 +206,11 @@ def _safe_futures_reference_progress(value: object) -> dict[str, object] | None:
                     "failure_type": _safe_identifier(item.get("failure_type")),
                     "duration_ms": duration_ms if duration_ms is not None else 0,
                     "fallback": item.get("fallback") is True,
+                    "provider_error_type": _safe_identifier(
+                        item.get("provider_error_type")
+                    ),
+                    "http_status": http_status,
+                    "retryable": retryable if isinstance(retryable, bool) else None,
                 }
             )
 
@@ -217,6 +226,10 @@ def _safe_futures_reference_progress(value: object) -> dict[str, object] | None:
                 if (root := _safe_root(raw_root)) is not None
             ] if isinstance(item.get("roots"), list) else []
             duration_ms = _nonnegative_int(item.get("duration_ms"))
+            http_status = _nonnegative_int(item.get("http_status"))
+            if http_status is not None and not 100 <= http_status <= 599:
+                http_status = None
+            retryable = item.get("retryable")
             units.append(
                 {
                     "unit": _safe_identifier(item.get("unit")),
@@ -228,8 +241,22 @@ def _safe_futures_reference_progress(value: object) -> dict[str, object] | None:
                     "duration_ms": duration_ms if duration_ms is not None else 0,
                     "failure_type": _safe_identifier(item.get("failure_type")),
                     "fallback": item.get("fallback") is True,
+                    "provider_error_type": _safe_identifier(
+                        item.get("provider_error_type")
+                    ),
+                    "http_status": http_status,
+                    "retryable": retryable if isinstance(retryable, bool) else None,
                 }
             )
+
+    active_units = [
+        identifier
+        for item in value.get("active_units", [])
+        if (identifier := _safe_identifier(item)) is not None
+    ] if isinstance(value.get("active_units"), list) else []
+    fallback_max_workers = _nonnegative_int(value.get("fallback_max_workers"))
+    if fallback_max_workers is not None and not 1 <= fallback_max_workers <= 4:
+        fallback_max_workers = None
 
     try:
         timeout_seconds = float(value.get("unit_timeout_seconds", 0.0))
@@ -249,12 +276,28 @@ def _safe_futures_reference_progress(value: object) -> dict[str, object] | None:
         "qualified_roots": qualified_roots,
         "unresolved_roots": unresolved_roots,
         "active_unit": _safe_identifier(value.get("active_unit")),
+        "active_units": active_units,
+        "fallback_max_workers": fallback_max_workers,
         "unit_timeout_seconds": timeout_seconds,
         "blocking_unit": _safe_identifier(value.get("blocking_unit")),
         "blocking_provider": _safe_identifier(value.get("blocking_provider")),
         "blocking_venue": _safe_identifier(value.get("blocking_venue")),
         "blocking_root": _safe_root(value.get("blocking_root")),
         "blocking_failure_type": _safe_identifier(value.get("blocking_failure_type")),
+        "blocking_provider_error_type": _safe_identifier(
+            value.get("blocking_provider_error_type")
+        ),
+        "blocking_http_status": (
+            status
+            if (status := _nonnegative_int(value.get("blocking_http_status"))) is not None
+            and 100 <= status <= 599
+            else None
+        ),
+        "blocking_retryable": (
+            value.get("blocking_retryable")
+            if isinstance(value.get("blocking_retryable"), bool)
+            else None
+        ),
         "nodes": nodes,
         "units": units,
         "credential_safe": True,
