@@ -258,6 +258,8 @@ def test_public_audit_promotes_granular_futures_root_dag(monkeypatch) -> None:
             "qualified_roots": ["ES"],
             "unresolved_roots": ["CL"],
             "active_unit": None,
+            "active_units": ["massive-root-CL"],
+            "fallback_max_workers": 3,
             "units": [
                 {
                     "unit": "cme-venue-cme",
@@ -291,6 +293,9 @@ def test_public_audit_promotes_granular_futures_root_dag(monkeypatch) -> None:
                     "duration_ms": 45000,
                     "failure_type": "timeout",
                     "fallback": True,
+                    "provider_error_type": "MassiveMultiAssetError",
+                    "http_status": 429,
+                    "retryable": True,
                 },
             ],
             "credential_safe": True,
@@ -314,6 +319,11 @@ def test_public_audit_promotes_granular_futures_root_dag(monkeypatch) -> None:
     assert progress["blocking_venue"] == "NYMEX"
     assert progress["blocking_root"] == "CL"
     assert progress["blocking_failure_type"] == "timeout"
+    assert progress["blocking_provider_error_type"] == "MassiveMultiAssetError"
+    assert progress["blocking_http_status"] == 429
+    assert progress["blocking_retryable"] is True
+    assert progress["active_units"] == ["massive-root-CL"]
+    assert progress["fallback_max_workers"] == 3
     assert progress["nodes"] == [
         {
             "root": "ES",
@@ -324,6 +334,9 @@ def test_public_audit_promotes_granular_futures_root_dag(monkeypatch) -> None:
             "failure_type": None,
             "duration_ms": 1200,
             "fallback": False,
+            "provider_error_type": None,
+            "http_status": None,
+            "retryable": None,
         },
         {
             "root": "CL",
@@ -334,6 +347,9 @@ def test_public_audit_promotes_granular_futures_root_dag(monkeypatch) -> None:
             "failure_type": "timeout",
             "duration_ms": 45000,
             "fallback": True,
+            "provider_error_type": "MassiveMultiAssetError",
+            "http_status": 429,
+            "retryable": True,
         },
     ]
 

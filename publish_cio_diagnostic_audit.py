@@ -155,6 +155,10 @@ def _safe_futures_reference_progress(
                 if (root := _safe_root(raw_root)) is not None
             ] if isinstance(item.get("roots"), list) else []
             duration_ms = _safe_nonnegative_int(item.get("duration_ms"))
+            http_status = _safe_nonnegative_int(item.get("http_status"))
+            if http_status is not None and not 100 <= http_status <= 599:
+                http_status = None
+            retryable = item.get("retryable")
             units.append(
                 {
                     "unit": _safe_identifier(item.get("unit")),
@@ -166,6 +170,11 @@ def _safe_futures_reference_progress(
                     "duration_ms": duration_ms if duration_ms is not None else 0,
                     "failure_type": _safe_identifier(item.get("failure_type")),
                     "fallback": item.get("fallback") is True,
+                    "provider_error_type": _safe_identifier(
+                        item.get("provider_error_type")
+                    ),
+                    "http_status": http_status,
+                    "retryable": retryable if isinstance(retryable, bool) else None,
                 }
             )
 
@@ -208,8 +217,22 @@ def _safe_futures_reference_progress(
                 "failure_type": None if latest is None else latest.get("failure_type"),
                 "duration_ms": 0 if latest is None else latest.get("duration_ms", 0),
                 "fallback": False if latest is None else latest.get("fallback") is True,
+                "provider_error_type": (
+                    None if latest is None else latest.get("provider_error_type")
+                ),
+                "http_status": None if latest is None else latest.get("http_status"),
+                "retryable": None if latest is None else latest.get("retryable"),
             }
         )
+
+    active_units = [
+        identifier
+        for item in progress.get("active_units", [])
+        if (identifier := _safe_identifier(item)) is not None
+    ] if isinstance(progress.get("active_units"), list) else []
+    fallback_max_workers = _safe_nonnegative_int(progress.get("fallback_max_workers"))
+    if fallback_max_workers is not None and not 1 <= fallback_max_workers <= 4:
+        fallback_max_workers = None
 
     raw_timeout = str(
         values.get("CAPITAL_INTELLIGENCE_FUTURES_REFERENCE_UNIT_TIMEOUT_SECONDS")
@@ -234,6 +257,8 @@ def _safe_futures_reference_progress(
         "qualified_roots": qualified_roots,
         "unresolved_roots": unresolved_roots,
         "active_unit": _safe_identifier(progress.get("active_unit")),
+        "active_units": active_units,
+        "fallback_max_workers": fallback_max_workers,
         "unit_timeout_seconds": unit_timeout_seconds,
         "blocking_unit": None if blocking is None else blocking.get("unit"),
         "blocking_provider": None if blocking is None else blocking.get("provider"),
@@ -241,6 +266,15 @@ def _safe_futures_reference_progress(
         "blocking_root": None if blocking is None else blocking.get("root"),
         "blocking_failure_type": (
             None if blocking is None else blocking.get("failure_type")
+        ),
+        "blocking_provider_error_type": (
+            None if blocking is None else blocking.get("provider_error_type")
+        ),
+        "blocking_http_status": (
+            None if blocking is None else blocking.get("http_status")
+        ),
+        "blocking_retryable": (
+            None if blocking is None else blocking.get("retryable")
         ),
         "nodes": nodes,
         "units": units,

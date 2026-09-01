@@ -232,6 +232,7 @@ class GranularFuturesReferenceProvider:
                 "unresolved_roots": unresolved,
                 "active_unit": self._active_unit,
                 "active_units": list(self._active_units),
+                "fallback_max_workers": _fallback_max_workers(self.values),
                 "units": [dict(item) for item in self._units],
                 "credential_safe": True,
                 "decision_evidence_authority": False,
