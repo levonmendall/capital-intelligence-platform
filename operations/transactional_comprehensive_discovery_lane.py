@@ -275,6 +275,8 @@ def _reusable_transaction_state(
         merged = _legacy._descriptor(state.get("blob"))
         _legacy._verify_blob(request_path.parent, merged)
         if state.get("scheduled") is True:
+            if state.get("provider_publication_verified") is not True:
+                return None
             publication = Path(str(state.get("provider_preselection_path") or ""))
             if not publication.is_file() or publication.is_symlink():
                 return None
@@ -349,6 +351,9 @@ def run_lane_transaction(
         )
 
         publication_path: str | None = None
+        publication_verified = False
+        publication_result: _publication.ProviderPreselectionPublicationResult | None = None
+        lane_policy = None
         if scheduled:
             publication_file = _publication_path(
                 directory, asset_class=asset_class.value, index=index
@@ -358,18 +363,29 @@ def run_lane_transaction(
                 policy, provider_preselection_path=publication_path
             )
             try:
-                publication = _publication.ensure_provider_preselection_publication(
+                publication_result = _publication.ensure_provider_preselection_publication(
                     {asset_class: merged},
                     as_of=timestamp,
                     policy=lane_policy,
                     market_probe=core.default_provider_preselection_market_probe,
                 )
+                verified_publication = _publication.verify_provider_preselection_publication(
+                    {asset_class: merged},
+                    publication=publication_result,
+                    as_of=timestamp,
+                    policy=lane_policy,
+                    expected_path=publication_file,
+                )
             except _publication.ProviderPreselectionPublicationError as error:
-                raise _legacy.ComprehensiveDiscoverySpoolError(str(error)) from error
-            if int(getattr(publication, "catalog_count", -1)) != len(merged):
+                raise _legacy.ComprehensiveDiscoverySpoolError(
+                    f"{asset_class.value} transactional provider publication failed; "
+                    f"failure_type={type(error).__name__}; detail={error}"
+                ) from error
+            if int(getattr(verified_publication, "catalog_count", -1)) != len(merged):
                 raise _legacy.ComprehensiveDiscoverySpoolError(
                     f"{asset_class.value} transactional provider publication count changed"
                 )
+            publication_verified = True
 
         peak = _bounded._peak_rss_bytes()
         publication_state: dict[str, object] = {
@@ -380,6 +396,7 @@ def run_lane_transaction(
             "dynamic": dynamic,
             "scheduled": scheduled,
             "provider_preselection_path": publication_path,
+            "provider_publication_verified": publication_verified,
             "peak_rss_bytes": peak,
             "bounded_provider_publication": True,
             "transactional_lane_compaction": True,
@@ -420,6 +437,23 @@ def run_lane_transaction(
                 index=index,
             )
             peak = max(peak, screening_peak)
+            if publication_result is None or lane_policy is None:
+                raise _legacy.ComprehensiveDiscoverySpoolError(
+                    f"{asset_class.value} scheduled lane lost provider publication state"
+                )
+            try:
+                _publication.verify_provider_preselection_publication(
+                    {asset_class: merged},
+                    publication=publication_result,
+                    as_of=timestamp,
+                    policy=lane_policy,
+                    expected_path=publication_path,
+                )
+            except _publication.ProviderPreselectionPublicationError as error:
+                raise _legacy.ComprehensiveDiscoverySpoolError(
+                    f"{asset_class.value} provider publication failed pre-commit readback; "
+                    f"failure_type={type(error).__name__}; detail={error}"
+                ) from error
 
         transaction_state: dict[str, object] = {
             "request_id": request_id,
@@ -430,6 +464,7 @@ def run_lane_transaction(
             "dynamic": dynamic,
             "scheduled": scheduled,
             "provider_preselection_path": publication_path,
+            "provider_publication_verified": publication_verified,
             "node": dict(node_body) if isinstance(node_body, Mapping) else None,
             "compatibility_rebound": rebound,
             "peak_rss_bytes": peak,
