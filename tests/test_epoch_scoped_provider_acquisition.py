@@ -515,6 +515,7 @@ def test_lane_fanout_builds_and_promotes_clean_publication_without_screening_or_
         monkeypatch, tmp_path
     )
     observed = {}
+    verified = {}
 
     def fake_publication(catalogs, *, as_of, policy, market_probe):
         observed["catalogs"] = catalogs
@@ -526,12 +527,46 @@ def test_lane_fanout_builds_and_promotes_clean_publication_without_screening_or_
         events.append(("publication", stage_path))
         return SimpleNamespace(
             path=stage_path,
+            available_at=timestamp,
             catalog_count=2,
+            signal_count=2,
             reused=False,
             limitations=(),
         )
 
+    def verify_artifact(
+        path,
+        *,
+        as_of,
+        fingerprint,
+        catalog_count,
+        signal_count,
+        available_at,
+        freshness_days,
+    ):
+        verified.update(
+            {
+                "path": Path(path),
+                "as_of": as_of,
+                "fingerprint": fingerprint,
+                "catalog_count": catalog_count,
+                "signal_count": signal_count,
+                "available_at": available_at,
+                "freshness_days": freshness_days,
+            }
+        )
+        assert Path(path) == publication_path
+        assert publication_path.is_file()
+        assert not publication_path.with_name(publication_path.name + ".fanout").exists()
+        return SimpleNamespace(path=Path(path))
+
     monkeypatch.setattr(publication, "ensure_provider_preselection_publication", fake_publication)
+    monkeypatch.setattr(
+        publication,
+        "provider_preselection_catalog_fingerprint",
+        lambda catalogs: "fingerprint-1",
+    )
+    monkeypatch.setattr(publication, "verify_provider_preselection_artifact", verify_artifact)
 
     result = fanout.prepare_lane_provider_publication(
         request_path,
@@ -550,11 +585,67 @@ def test_lane_fanout_builds_and_promotes_clean_publication_without_screening_or_
     assert observed["catalogs"] == {asset_class: merged}
     assert publication_path.is_file()
     assert not staging_path.exists()
+    assert verified == {
+        "path": publication_path,
+        "as_of": timestamp,
+        "fingerprint": "fingerprint-1",
+        "catalog_count": 2,
+        "signal_count": 2,
+        "available_at": timestamp,
+        "freshness_days": 3,
+    }
     assert events == [
         ("bind-fingerprint",),
         ("load-cache", asset_class, "policy-v1", timestamp),
         ("publication", staging_path),
     ]
+
+
+def test_lane_fanout_removes_promoted_publication_when_canonical_verification_fails(
+    monkeypatch, tmp_path
+) -> None:
+    from operations import bounded_provider_preselection_publication as publication
+
+    asset_class, request_path, timestamp, _merged, _events, publication_path = _configure_cached_lane(
+        monkeypatch, tmp_path
+    )
+
+    def fake_publication(catalogs, *, as_of, policy, market_probe):
+        stage_path = Path(policy.provider_preselection_path)
+        stage_path.write_text("{}", encoding="utf-8")
+        return SimpleNamespace(
+            path=stage_path,
+            available_at=timestamp,
+            catalog_count=2,
+            signal_count=2,
+            reused=False,
+            limitations=(),
+        )
+
+    def fail_verification(path, **_kwargs):
+        assert Path(path) == publication_path
+        assert publication_path.is_file()
+        raise publication.ProviderPreselectionPublicationError("durable readback failed")
+
+    monkeypatch.setattr(publication, "ensure_provider_preselection_publication", fake_publication)
+    monkeypatch.setattr(
+        publication,
+        "provider_preselection_catalog_fingerprint",
+        lambda catalogs: "fingerprint-1",
+    )
+    monkeypatch.setattr(publication, "verify_provider_preselection_artifact", fail_verification)
+
+    with pytest.raises(publication.ProviderPreselectionPublicationError, match="durable readback failed"):
+        fanout.prepare_lane_provider_publication(
+            request_path,
+            values={"RENDER": "true"},
+            asset_class_value=asset_class.value,
+            index=2,
+        )
+
+    staging_path = publication_path.with_name(publication_path.name + ".fanout")
+    assert not publication_path.exists()
+    assert not staging_path.exists()
 
 
 def test_lane_fanout_discards_limited_publication_for_serial_retry(monkeypatch, tmp_path) -> None:
@@ -637,6 +728,54 @@ def test_lane_fanout_cache_miss_falls_back_without_reconstruction(monkeypatch, t
             asset_class_value=asset_class.value,
             index=0,
         )
+
+
+def test_provider_child_installs_real_request_progress_before_lane(monkeypatch, tmp_path) -> None:
+    from operations import evidence_preparation_progress as progress
+
+    request_path = tmp_path / "request.json"
+    request_path.write_text("{}", encoding="utf-8")
+    events: list[tuple[object, ...]] = []
+    monkeypatch.setenv("CAPITAL_INTELLIGENCE_TEST_PROGRESS_SENTINEL", "present")
+
+    def install(values):
+        events.append(("progress", values.get("CAPITAL_INTELLIGENCE_TEST_PROGRESS_SENTINEL")))
+
+    def prepare(path, *, values, asset_class_value, index):
+        events.append(
+            (
+                "provider",
+                Path(path),
+                values.get("CAPITAL_INTELLIGENCE_TEST_PROGRESS_SENTINEL"),
+                asset_class_value,
+                index,
+            )
+        )
+        return {"publication_ready": True}
+
+    monkeypatch.setattr(progress, "install_post_public_provider_progress", install)
+    monkeypatch.setattr(fanout, "prepare_lane_provider_publication", prepare)
+
+    assert fanout.main(
+        [
+            "--request",
+            str(request_path),
+            "--asset-class",
+            CandidateAssetClass.US_EQUITY.value,
+            "--index",
+            "0",
+        ]
+    ) == 0
+    assert events == [
+        ("progress", "present"),
+        (
+            "provider",
+            request_path,
+            "present",
+            CandidateAssetClass.US_EQUITY.value,
+            0,
+        ),
+    ]
 
 
 def test_runtime_wrapper_validates_reuse_only_handoff_before_canonical_builder(
