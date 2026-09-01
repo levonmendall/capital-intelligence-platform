@@ -104,16 +104,43 @@ def _base_universe_symbols() -> tuple[str, ...]:
     return tuple(sorted(universe.symbol_map))
 
 
+def _post_public_live_cache_reclamation(
+    values: Mapping[str, str],
+) -> dict[str, object]:
+    """Release bounded clean pages before the next U.S.-equity stage starts.
+
+    This is operational-only and deliberately fail-soft. It runs after public-live has
+    qualified but before that stage is durably completed, so the fresh U.S.-equity child
+    does not inherit avoidable data-root page cache from public collection. It changes no
+    memory threshold and cannot certify evidence.
+    """
+
+    try:
+        from operations.pre_comprehensive_cache_reclamation import (
+            release_pre_comprehensive_completed_stage_file_cache,
+        )
+
+        report = release_pre_comprehensive_completed_stage_file_cache(values)
+    except (OSError, RuntimeError, TypeError, ValueError):
+        return {
+            "status": "unavailable",
+            "advisory_only": True,
+            "evidence_certified": False,
+        }
+    return {
+        "status": str(report.get("status") or "completed"),
+        "released_file_count": report.get("released_file_count"),
+        "released_bytes": report.get("released_bytes"),
+        "raw_current_reclaimed_kib": report.get("raw_current_reclaimed_kib"),
+        "inactive_file_reclaimed_kib": report.get("inactive_file_reclaimed_kib"),
+        "advisory_only": True,
+        "evidence_certified": False,
+    }
+
+
 def _stage_reference(values: dict[str, str], state) -> dict[str, object]:
     from operations import component_qualified_evidence_maintenance as maintenance
 
-    # A first attempt may still bind to an older compatible public component so fresh
-    # release-independent evidence is not needlessly reacquired. A superseded attempt is
-    # different: its archived failed journal is durable proof that the older epoch already
-    # failed. Never move the replacement epoch backward behind evidence persisted while
-    # that failed attempt was running, or point-in-time historical validation can fail in
-    # the same way forever. If archive inspection itself is unavailable, fail safe by
-    # preserving the replacement epoch rather than permitting a backdated retry.
     preparation_cutoff = maintenance._resumable_evidence_cutoff(
         values,
         requested=state.evidence_as_of,
@@ -155,18 +182,16 @@ def _stage_public_live(values: dict[str, str], state) -> dict[str, object]:
     try:
         result = collector(state.evidence_as_of)
     except maintenance._plane.ContinuousEvidencePlaneError:
-        # Requirement groups are checkpointed durably as they qualify. Re-entering the
-        # canonical collector therefore reuses still-fresh successes and reacquires only
-        # unresolved groups. One bounded replay absorbs a transient provider failure while
-        # a second failure still propagates and leaves the stage fail-closed.
         result = collector(state.evidence_as_of)
     if getattr(result, "required_sources_ready", None) is not True:
         raise RuntimeError("required public-live evidence did not qualify")
+    cache_reclamation = _post_public_live_cache_reclamation(values)
     return {
         "public_live_state": str(getattr(result, "state", "available")),
         "qualified_component_id": str(
             getattr(result, "qualified_component_id", "") or ""
         ),
+        "post_public_live_cache_reclamation": cache_reclamation,
     }
 
 
@@ -225,18 +250,10 @@ def _stage_us_equity_discovery(values: dict[str, str], state) -> dict[str, objec
         )
         return {"snapshot_id": snapshot_id, "reused": False}
     finally:
-        # Provider/structural prerequisites are advisory, but comprehensive is now
-        # reuse-only. Give the sidecar only its original absolute acceleration window,
-        # then guarantee it is reaped before this stage is durably completed.
         prewarm.finish()
 
 
 def _stage_comprehensive_discovery(values: dict[str, str], state) -> dict[str, object]:
-    # The fresh stage interpreter installs the authoritative DAG runtime before importing
-    # discovery. On Render, allow only six provider-facing prewarm workers so independent
-    # acquisitions can overlap inside the existing evidence epoch. The transactional
-    # publication coordinator remains strictly serialized and still owns the heavy-memory
-    # lane, cache-reclamation handoff, and unchanged memory ceilings.
     _configure_render_dag_workers(values)
     from run_dag_native_continuous_evidence_plane import (
         install_and_verify_dag_native_runtime,
@@ -377,9 +394,6 @@ def _stage_finalize(values: dict[str, str], state) -> dict[str, object]:
     if not state.reference_manifest_id or not state.reference_manifest_path:
         raise RuntimeError("finalization has no durable reference binding")
 
-    # Refuse to repair evidence during finalization. Every provider-facing boundary has
-    # already completed in a separate stage. A missing/corrupt component is a fail-closed
-    # stage failure, never an excuse to re-enter a heavyweight acquisition path here.
     public = maintenance._load_public_component(
         values,
         cutoff=datetime.now(timezone.utc),
@@ -416,9 +430,6 @@ def _stage_finalize(values: dict[str, str], state) -> dict[str, object]:
     if paper_snapshot.evidence_as_of != state.evidence_as_of:
         raise RuntimeError("paper evidence snapshot changed its evidence epoch")
 
-    # The final generation publisher itself is provider-free. It receives lightweight
-    # adapters for the already-bound reference/public stages and a discovery callback that
-    # merely confirms the exact immutable snapshot already loaded above.
     generation = maintenance._plane.refresh_continuous_evidence_plane(
         as_of=state.evidence_as_of,
         values=values,
@@ -526,9 +537,6 @@ def run_stage(
         )
         return 2
 
-    # Durable stage completion is authoritative. Completion telemetry is strictly
-    # observational and must not retroactively convert a committed stage into a process
-    # failure when stdout is unavailable or a formatter/flush raises after the checkpoint.
     try:
         print(
             json.dumps(
